@@ -12,7 +12,7 @@
 using namespace std;
 int main()
 {
-    double start_clock = clock();
+    float start_clock = clock();
     ofstream f("result_cpu.txt"); // Solution Results
     f.setf(ios::fixed | ios::showpoint);
     f << setprecision(5);
@@ -23,7 +23,7 @@ int main()
     cout.setf(ios::fixed | ios::showpoint);
     cout << setprecision(5);
 
-    double T_B, Re, Pr, Fr, T_L, T_0, T_amb, h, dx, dy, t, ny, nx, dt, error, eps, abs, beta, iter, maxiter, tf, st, pold, counter, column, u_wind, T_R, Lx, Ly, viscosity;
+    float T_B, Re, Pr, Fr, T_L, T_0, T_amb, h, dx, dy, t, ny, nx, dt, error, eps, abs, beta, iter, maxiter, tf, st, pold, counter, column, u_wind, T_R, Lx, Ly, viscosity;
 
     // Input parameters 
     Lx = 2 * 2.0; Ly = 5.0; // Domain dimensions
@@ -52,29 +52,29 @@ int main()
 
     // Vectors
 
-    vector<vector<double> > u(nx, vector<double>(ny + 1));
-    vector<vector<double> > us(nx, vector<double>(ny + 1));
-    vector<vector<double> > uold(nx, vector<double>(ny + 1));
+    vector<vector<float> > u(nx, vector<float>(ny + 1));
+    vector<vector<float> > us(nx, vector<float>(ny + 1));
+    vector<vector<float> > uold(nx, vector<float>(ny + 1));
 
-    vector<vector<double> > v(nx + 1, vector<double>(ny));
-    vector<vector<double> > vs(nx + 1, vector<double>(ny));
-    vector<vector<double> > vold(nx + 1, vector<double>(ny));
+    vector<vector<float> > v(nx + 1, vector<float>(ny));
+    vector<vector<float> > vs(nx + 1, vector<float>(ny));
+    vector<vector<float> > vold(nx + 1, vector<float>(ny));
 
-    vector<vector<double> > p(nx + 1, vector<double>(ny + 1));
-    vector<vector<double> > T(nx + 1, vector<double>(ny + 1));
-    vector<vector<double> > Told(nx + 1, vector<double>(ny + 1));
+    vector<vector<float> > p(nx + 1, vector<float>(ny + 1));
+    vector<vector<float> > T(nx + 1, vector<float>(ny + 1));
+    vector<vector<float> > Told(nx + 1, vector<float>(ny + 1));
 
-    vector<vector<double> > sai(nx, vector<double>(ny));
-    vector<vector<double> > om(nx, vector<double>(ny));
-    vector<vector<double> > vc(nx, vector<double>(ny));
-    vector<vector<double> > uc(nx, vector<double>(ny));
+    vector<vector<float> > sai(nx, vector<float>(ny));
+    vector<vector<float> > om(nx, vector<float>(ny));
+    vector<vector<float> > vc(nx, vector<float>(ny));
+    vector<vector<float> > uc(nx, vector<float>(ny));
 
-    vector<vector<double> > pc(nx, vector<double>(ny));
-    vector<vector<double> > Tc(nx, vector<double>(ny));
+    vector<vector<float> > pc(nx, vector<float>(ny));
+    vector<vector<float> > Tc(nx, vector<float>(ny));
 
     // Time step size stability criterion
 
-    double mt1 = 0.25*pow(dx, 2.0) / (1.0 / Re); double Rer = 1.0 / Re; double mt2 = 0.25*pow(dy, 2.0) / (1.0 / Re);
+    float mt1 = 0.25*pow(dx, 2.0) / (1.0 / Re); float Rer = 1.0 / Re; float mt2 = 0.25*pow(dy, 2.0) / (1.0 / Re);
 
     if (mt1 > Rer)
     {
@@ -210,8 +210,8 @@ int main()
         {
             for (int j = 1; j < ny; j++)
             {
-                double vh = 1.0 / 4.0*(v[i][j] + v[i + 1][j] + v[i][j - 1] + v[i + 1][j - 1]); // v hat
-                double a = u[i][j] * 1.0 / (2.0*dx)*(u[i + 1][j] - u[i - 1][j]) + vh*1.0 / (2.0*dy)*(u[i][j + 1] - u[i][j - 1]); // a
+                float vh = 1.0 / 4.0*(v[i][j] + v[i + 1][j] + v[i][j - 1] + v[i + 1][j - 1]); // v hat
+                float a = u[i][j] * 1.0 / (2.0*dx)*(u[i + 1][j] - u[i - 1][j]) + vh*1.0 / (2.0*dy)*(u[i][j + 1] - u[i][j - 1]); // a
                 us[i][j] = dt / Re*(1.0 / pow(dx, 2.0)*(u[i + 1][j] - 2.0*u[i][j] + u[i - 1][j]) + 1.0 / pow(dy, 2.0)*(u[i][j + 1] - 2.0*u[i][j] + u[i][j - 1])) - a*dt + u[i][j]; // u star
             } // end for j
         } // end for i
@@ -223,8 +223,8 @@ int main()
         {
             for (int j = 1; j < ny - 1; j++)
             {
-                double uh = 1.0 / 4.0*(u[i][j] + u[i][j + 1] + u[i - 1][j] + u[i - 1][j + 1]);
-                double b = uh*1.0 / (2.0*dx)*(v[i + 1][j] - v[i - 1][j]) + v[i][j] * 1.0 / (2.0*dy)*(v[i][j + 1] - v[i][j - 1]); // b
+                float uh = 1.0 / 4.0*(u[i][j] + u[i][j + 1] + u[i - 1][j] + u[i - 1][j + 1]);
+                float b = uh*1.0 / (2.0*dx)*(v[i + 1][j] - v[i - 1][j]) + v[i][j] * 1.0 / (2.0*dy)*(v[i][j + 1] - v[i][j - 1]); // b
                 vs[i][j] = dt / Re*(1.0 / pow(dx, 2.0)*(v[i + 1][j] - 2.0*v[i][j] + v[i - 1][j]) + 1.0 / pow(dy, 2.0)*(v[i][j + 1] - 2.0*v[i][j] + v[i][j - 1])) + dt / pow(Fr, 2.0)*(0.5*(T[i][j] + T[i][j - 1]) - 1) / (0.5*(T[i][j] + T[i][j - 1])) - b*dt + v[i][j]; // v 
             } // end for j
         } // end for i
@@ -281,7 +281,7 @@ int main()
         // Poisson equation for pressure
         int step2_start = clock();
 
-        double error = 1; iter = 0;
+        float error = 1; iter = 0;
 
         // Solve for pressure iteratively until it converges - Using Gauss Seidel SOR 
         while (error > eps)
@@ -445,7 +445,7 @@ int main()
         // Checking the steady state condition
         int step5_start = clock();
 
-        double TVt, TV, TV2, TV3; TV = 0; TV2 = 0; TV3 = 0; double abs, abs2, abs3;
+        float TVt, TV, TV2, TV3; TV = 0; TV2 = 0; TV3 = 0; float abs, abs2, abs3;
         for (int i = 1; i < nx - 1; i++)
         {
             for (int j = 1; j < ny - 2; j++)
@@ -512,7 +512,7 @@ int main()
     } // end for j
     //.........................................................................................................
 
-    double end_clock = clock();
+    float end_clock = clock();
     cout << "CPU time = " << (end_clock - start_clock) / CLOCKS_PER_SEC << " (s)" << endl;
     //cout << "Re = " << Re << endl;
     //cout << "Fr = " << Fr << endl;

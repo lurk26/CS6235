@@ -24,11 +24,12 @@ int main()
 {
     float start_clock = clock();
 //    ofstream f("lx4 - Re300 - Fr300 - results.txt"); // Solution Results
-      ofstream f("result_cpu4.txt"); // Solution Results
+      ofstream f("result_gpu.txt"); // Solution Results
     f.setf(ios::fixed | ios::showpoint);
     f << setprecision(5);
 
-    ofstream g("lx4 - Re300 - Fr300 - convergence.txt"); // Convergence history
+//    ofstream g("lx4 - Re300 - Fr300 - convergence.txt"); // Convergence history
+    ofstream g("convergence_gpu.txt"); // Convergence history
     g.setf(ios::fixed | ios::showpoint);
     g << setprecision(5);
     cout.setf(ios::fixed | ios::showpoint);
@@ -109,12 +110,12 @@ thrust::device_vector<float> Tc_h_gpu(nx*ny);
 
 int wu, wv, wp, wT, wc;
 
-wu = nx; // number of rows of u vector
-wv = nx + 1; // number of rows of v vector
-wp = nx + 1; // number of rows of p vector
-wT = nx + 1; // number of rows of T vector
+wu = ny + 1; // number of rows of u vector
+wv = ny; // number of rows of v vector
+wp = ny + 1; // number of rows of p vector
+wT = ny + 1; // number of rows of T vector
 //wsai = nx; // number of rows of sai vector
-wc = nx; // number of rows of collocated vectors
+wc = ny; // number of rows of collocated vectors
 
 /*  
     vector<vector<float> > u(nx, vector<float>(ny + 1));
