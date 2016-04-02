@@ -12,14 +12,14 @@
 #include <thrust/device_vector.h>
 
 using namespace std;
-
+/*
 #define BLOCK_SIZE 32 // Number of threads in x and y direction - Maximum Number of threads per block = 32 * 32 = 1024
 
 // Kernel Definitions
 
 //__global__ void sobel( int xd_size, int yd_size, int maxdval, int d_thresh, unsigned int *input , int *output)
 //{
-
+*/
 int main()
 {
     float start_clock = clock();
