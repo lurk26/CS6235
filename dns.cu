@@ -398,6 +398,7 @@ wc = nx; // number of rows of collocated vectors
                     {
                         if (j*dy < 2.0)
                         {
+
                             p[i * wp + j] = p[(i - 1) * wp + j]; // right wall - not the outlet - Final
                         }
                         else
