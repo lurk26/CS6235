@@ -7,44 +7,35 @@
 #include <algorithm>
 #include <string>
 #include <map>
-#include <helper_image.h>     // helper for image and data comparison
+#include <stdint.h>
 #include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
 
 using namespace std;
-
-#define BLOCK_SIZE 32 // Number of threads in x and y direction - Maximum Number of threads per block = 32 * 32 = 1024
-
-// Kernel Definitions
-
-//__global__ void sobel( int xd_size, int yd_size, int maxdval, int d_thresh, unsigned int *input , int *output)
-//{
-
 int main()
 {
+    // output format
     float start_clock = clock();
-//    ofstream f("lx4 - Re300 - Fr300 - results.txt"); // Solution Results
-      ofstream f("result_gpu.txt"); // Solution Results
+    ofstream f("result_gpu.txt"); // Solution Results
     f.setf(ios::fixed | ios::showpoint);
     f << setprecision(5);
 
-//    ofstream g("lx4 - Re300 - Fr300 - convergence.txt"); // Convergence history
     ofstream g("convergence_gpu.txt"); // Convergence history
     g.setf(ios::fixed | ios::showpoint);
     g << setprecision(5);
     cout.setf(ios::fixed | ios::showpoint);
     cout << setprecision(5);
 
-    float Re, Pr, Fr, T_L, T_0, T_amb, dx, dy, t, ny, nx, dt, eps, abs, beta, iter, maxiter, tf, st, pold, counter, column, u_wind, T_R, Lx, Ly;
-
     // Input parameters 
-    Lx = 2 * 2.0; Ly = 5.0; // Domain dimensions
-    nx = Lx * 2.0; ny = Ly * 2.0; // Grid size - Number of nodes
+    float Re, Pr, Fr, T_L, T_0, T_amb, ni, nj, dx, dy, t, ny, nx, eps, beta, iter, maxiter, tf, st, counter, column, u_wind, T_R, Lx, Ly;
+    Lx = 4.0; Ly = 5.0; // Domain dimensions
+    ni = 2.0; // Number of nodes per unit length in x direction
+    nj = 2.0; // Number of nodes per unit length in y direction
+    nx = Lx * ni; ny = Ly * nj; // Number of Nodes in each direction
     u_wind = 1; // Reference velocity
-//    viscosity = 0.5*(16.97 + 18.90)*pow(10.0, -6.0); // Fluid viscosity
     st = 0.00005; // Total variance criteria
     eps = 0.001; // Pressure convergence criteria
-    tf = 100; // Final time step
+    tf = 100.0; // Final time step
     Pr = 0.5*(0.709 + 0.711); // Prandtl number
     Re = 30.0; Fr = 0.3; // Non-dimensional numbers for inflow conditions
     dx = Lx / (nx - 1); dy = Ly / (ny - 1); // dx and dy
@@ -62,87 +53,36 @@ int main()
     // Records number of clicks a step takes
     std::map<string, uint32_t> stepTimingAccumulator;
 
+    // Vectors
 
+    thrust::host_vector<float> u(nx * (ny + 1));
+    thrust::host_vector<float> us(nx*(ny + 1));
+    thrust::host_vector<float> uold(nx * (ny + 1));
+    float wu = ny + 1;
 
-//.................................................GPU Version.................................................
+    thrust::host_vector<float> v((nx + 1) * ny);
+    thrust::host_vector<float> vs((nx + 1) * ny);
+    thrust::host_vector<float> vold((nx + 1) * ny);
+    float wv = ny;
 
+    thrust::host_vector<float> p((nx + 1) * (ny + 1));
+    float wp = ny + 1;
 
-thrust::host_vector<float> u(nx*(ny+1));
-thrust::host_vector<float> us(nx*(ny+1));
-thrust::host_vector<float> uold(nx*(ny+1));
+    thrust::host_vector<float> T((nx + 1) * (ny + 1));
+    float wT = ny + 1;
 
-thrust::host_vector<float> v((nx+1)*ny);
-thrust::host_vector<float> vs((nx+1)*ny);
-thrust::host_vector<float> vold((nx+1)*ny);
-
-thrust::host_vector<float> p((nx+1)*(ny+1));
-thrust::host_vector<float> T((nx+1)*(ny+1));
-thrust::host_vector<float> Told((nx+1)*(ny+1));
-
-thrust::host_vector<float> sai(nx*ny);
-thrust::host_vector<float> omc_gpu(nx*ny);
-thrust::host_vector<float> vc_gpu(nx*ny);
-thrust::host_vector<float> uc_gpu(nx*ny);
-
-thrust::host_vector<float> pc_gpu(nx*ny);
-thrust::host_vector<float> Tc_gpu(nx*ny);
-
-thrust::device_vector<float> u_h(nx*(ny+1));
-thrust::device_vector<float> us_h(nx*(ny+1));
-thrust::device_vector<float> uold_h(nx*(ny+1));
-
-thrust::device_vector<float> v_h((nx+1)*ny);
-thrust::device_vector<float> vs_h((nx+1)*ny);
-thrust::device_vector<float> vold_h((nx+1)*ny);
-
-thrust::device_vector<float> p_h((nx+1)*(ny+1));
-thrust::device_vector<float> T_h((nx+1)*(ny+1));
-thrust::device_vector<float> Told_h((nx+1)*(ny+1));
-
-thrust::device_vector<float> sai_h(nx*ny);
-thrust::device_vector<float> omc_h_gpu(nx*ny);
-thrust::device_vector<float> vc_h_gpu(nx*ny);
-thrust::device_vector<float> uc_h_gpu(nx*ny);
-
-thrust::device_vector<float> pc_h_gpu(nx*ny);
-thrust::device_vector<float> Tc_h_gpu(nx*ny);
-
-
-int wu, wv, wp, wT, wc;
-
-wu = ny + 1; // number of rows of u vector
-wv = ny; // number of rows of v vector
-wp = ny + 1; // number of rows of p vector
-wT = ny + 1; // number of rows of T vector
-//wsai = nx; // number of rows of sai vector
-wc = ny; // number of rows of collocated vectors
-
-/*  
-    vector<vector<float> > u(nx, vector<float>(ny + 1));
-    vector<vector<float> > us(nx, vector<float>(ny + 1));
-    vector<vector<float> > uold(nx, vector<float>(ny + 1));
-
-    vector<vector<float> > v(nx + 1, vector<float>(ny));
-    vector<vector<float> > vs(nx + 1, vector<float>(ny));
-    vector<vector<float> > vold(nx + 1, vector<float>(ny));
-
-    vector<vector<float> > p(nx + 1, vector<float>(ny + 1));
-    vector<vector<float> > T(nx + 1, vector<float>(ny + 1));
-    vector<vector<float> > Told(nx + 1, vector<float>(ny + 1));
-
-    vector<vector<float> > sai(nx, vector<float>(ny));
-    vector<vector<float> > omc_cpu(nx, vector<float>(ny));
-    vector<vector<float> > vc_cpu(nx, vector<float>(ny));
-    vector<vector<float> > uc_cpu(nx, vector<float>(ny));
-
-    vector<vector<float> > pc_cpu(nx, vector<float>(ny));
-    vector<vector<float> > Tc_cpu(nx, vector<float>(ny));
-*/
-
+    thrust::host_vector<float> Told((nx + 1) * (ny + 1));
+    thrust::host_vector<float> om(nx * ny);
+    thrust::host_vector<float> vc(nx * ny);
+    thrust::host_vector<float> uc(nx * ny);
+    thrust::host_vector<float> pc(nx * ny);
+    thrust::host_vector<float> Tc(nx*ny);
+    float wc = ny;
 
     // Time step size stability criterion
 
     float mt1 = 0.25*pow(dx, 2.0) / (1.0 / Re); float Rer = 1.0 / Re; float mt2 = 0.25*pow(dy, 2.0) / (1.0 / Re);
+    float dt;
 
     if (mt1 > Rer)
     {
@@ -254,7 +194,7 @@ wc = ny; // number of rows of collocated vectors
                 {
                     if (j*dy < 2.0)
                     {
-                        v[i * wv + j] = -v[(i -1) * wv + j]; // right ghost (Right wall has 0 vertical velocity) - Final
+                        v[i * wv + j] = -v[(i - 1) * wv + j]; // right ghost (Right wall has 0 vertical velocity) - Final
                     }
                     else
                     {
@@ -350,14 +290,12 @@ wc = ny; // number of rows of collocated vectors
         int step2_start = clock();
 
         float error = 1; iter = 0;
-
-	thrust::device_vector<float> (nx*ny);
-
-
+	float diffp, pold;
         // Solve for pressure iteratively until it converges - Using Gauss Seidel SOR 
         while (error > eps)
         {
             error = 0;
+
             //............................................................................................
             for (int i = 1; i < nx; i++)
             {
@@ -365,8 +303,8 @@ wc = ny; // number of rows of collocated vectors
                 {
                     pold = p[i * wp + j];
                     p[i * wp + j] = beta*pow(dx, 2.0)*pow(dy, 2.0) / (-2.0*(pow(dx, 2.0) + pow(dy, 2.0)))*(-1.0 / pow(dx, 2.0)*(p[(i + 1) * wp + j] + p[(i - 1) * wp + j] + p[i * wp + j + 1] + p[i * wp + j - 1]) + 1.0 / dt*(1.0 / dx*(us[i * wu + j] - us[(i - 1) * wu + j]) + 1.0 / dy*(vs[i * wv + j] - vs[i * wv + j - 1]))) + (1.0 - beta)*p[i * wp + j];
-                    abs = pow((p[i * wp + j] - pold), 2.0);
-                    error = error + abs;
+                    diffp = pow((p[i * wp + j] - pold), 2.0);
+                    error = error + diffp;
                 } // end for j
             } // end for i
             //............................................................................................
@@ -495,7 +433,7 @@ wc = ny; // number of rows of collocated vectors
                     }
                     else
                     {
-                        T[i * wT + j] = 2.0*T_0 / T_amb - T[(i + 1) + j]; // left inlet at T_0 (initial temperature) - Final
+                        T[i * wT + j] = 2.0*T_0 / T_amb - T[(i + 1) * wT + j]; // left inlet at T_0 (initial temperature) - Final
                     }
                 }
                 else if (i == nx)
@@ -516,22 +454,21 @@ wc = ny; // number of rows of collocated vectors
         // Checking the steady state condition
         int step5_start = clock();
 
-        float TV, abs; TV=0; // float abs, TVt, TV2, TV3; TV = 0; TV2 = 0; TV3 = 0; float abs, abs2, abs3;
+        float TV, diffv; TV = 0;
         for (int i = 1; i < nx - 1; i++)
         {
             for (int j = 1; j < ny - 2; j++)
             {
-                abs = v[i * wv + j] - vold[i * wv + j];
-                TV = TV + pow(pow(abs, 2), 0.5);
+                diffv = v[i * wv + j] - vold[i * wv + j];
+                TV = TV + pow(pow(diffv, 2), 0.5);
             } // end for i
         } // end for j
 
         TV = TV / ((nx - 1)*(ny - 2));
-	
-	float st_time;
+
         if (TV < st && error < eps)
         {
-            st_time = t;
+            cout << "Steady state time = " << t << " (s) " << endl;
             break;
         }
         counter = counter + 1;
@@ -561,12 +498,11 @@ wc = ny; // number of rows of collocated vectors
     {
         for (int j = 0; j < ny; j++)
         {
-            vc_gpu[i * wc + j] = 1.0 / 2.0*(v[(i + 1) * wv + j] + v[i * wv + j]);
-            pc_gpu[i * wc + j] = 1.0 / 4.0*(p[i * wp + j] + p[(i + 1) * wp + j] + p[i * wp + j + 1] + p[(i + 1) * wp + j + 1]);
-            uc_gpu[i * wc + j] = 1.0 / 2.0*(u[i * wu + j] + u[i * wu + j + 1]);
-            omc_gpu[i * wc + j] = 1.0 / dx*(v[(i + 1) * wv + j] - v[i * wv + j]) - 1.0 / dy*(u[i * wu + j + 1] - u[i * wu + j]);
-            Tc_gpu[i * wc + j] = 1.0 / 4.0*(T[i * wT + j] + T[(i + 1) * wT + j] + T[i * wT + j + 1] + T[(i + 1) * wT + j + 1]);
-
+            vc[i * wc + j] = 1.0 / 2.0*(v[(i + 1) * wv + j] + v[i * wv + j]);
+            pc[i * wc + j] = 1.0 / 4.0*(p[i * wp + j] + p[(i + 1) * wp + j] + p[i * wp + j + 1] + p[(i + 1) * wp + j + 1]);
+            uc[i * wc + j] = 1.0 / 2.0*(u[i*wu + j] + u[i * wu + j + 1]);
+            om[i * wc + j] = 1.0 / dx*(v[(i + 1) * wv + j] - v[i * wv + j]) - 1.0 / dy*(u[i * wu + j + 1] - u[i * wu + j]);
+            Tc[i * wc + j] = 1.0 / 4.0*(T[i * wT + j] + T[(i + 1) * wT + j] + T[i * wT + j + 1] + T[(i + 1) * wT + j + 1]);
         } // end for j
     } // end for i
     //........................................................................................................
@@ -579,48 +515,21 @@ wc = ny; // number of rows of collocated vectors
     {
         for (int i = 0; i < nx; i++)
         {
-            f << setw(15) << t - dt << setw(15) << i*dx << setw(15) << j*dy << setw(15) << uc_gpu[i * wc + j] << setw(15) << vc_gpu[i * wc + j] << setw(15) << pc_gpu[i * wc + j] << setw(15) << Tc_gpu[i * wc + j] * T_amb - 273.15 << setw(15) << omc_gpu[i * wc + j] << endl;
+            f << setw(15) << t - dt << setw(15) << i*dx << setw(15) << j*dy << setw(15) << uc[i * wc + j] << setw(15) << vc[i * wc + j] << setw(15) << pc[i * wc + j] << setw(15) << Tc[i * ny + j] * T_amb - 273.15 << setw(15) << om[i * wc + j] << endl;
         } // end for i
     } // end for j
     //.........................................................................................................
 
     float end_clock = clock();
+    cout << "CPU time = " << (end_clock - start_clock) / CLOCKS_PER_SEC << " (s)" << endl;
+    //cout << "Re = " << Re << endl;
+    //cout << "Fr = " << Fr << endl;
 
     for (auto it = stepTimingAccumulator.begin(); it != stepTimingAccumulator.end(); it++)
     {
         float seconds = (float)it->second / CLOCKS_PER_SEC;
         std::cout << it->first << "\t" << seconds << endl;
     }
-//.................................................End of GPU Version..........................................
-
-
-// Compare CPU and GPU results
-/*  bool success = true; 
- for (int j = 0; j < ny; j++)
-  {
-      for (int i = 0; i < nx; i++)
-      {
-	  if (uc_cpu[i][j] != uc_cpu[i][j] || vc_cpu[i][j] != vc_cpu[i][j] || pc_cpu[i][j] != pc_cpu[i][j] || Tc_cpu[i][j] != Tc_cpu[i][j])
-          {
-             success = false;
-          }
-      }
- }
-	if (success == true)
-	{ 
-	   printf("\n");
-	   printf("*** kernel PASSED ***\n"); //, kernelName);
-	   printf("The outputs of CPU version and GPU version are identical.\n");
-	}
-	else
-	{  
-	   printf("\n");
-	   printf("*** kernel FAILED ***\n"); //, kernelName);
-	}
-*/
-    cout << "" << endl;
-    cout << "Steady state time = " << t << " (s) " << endl;
-    cout << "GPU time = " << (end_clock - start_clock) / CLOCKS_PER_SEC << " (s)" << endl;
 
     return 0;
 } // end main
