@@ -8,47 +8,28 @@
 #include <string>
 #include <map>
 #include <stdint.h>
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
 
 using namespace std;
-
-#define BLOCK_SIZE 32 // Number of threads in x and y direction - Maximum Number of threads per block = 32 * 32 = 1024
-
-__global__ void Temperature_solver(int nx, int ny, int wu, int wv, int wT, float dx, float dy, float dt, float Re, float Pr, float *u, float *v, float *Told, float *T)
-{
-
-int i = blockIdx.x * blockDim.x + threadIdx.x;
-int j = blockIdx.y * blockDim.y + threadIdx.y;
-
-	if (i > 0 && i < nx && j > 0 && j < ny){
-
-                Told[i * wT + j] = T[i * wT + j];
-                T[i * wT + j] = T[i * wT + j] + dt*(-0.5*(u[i * wu + j] + u[(i - 1) * wu + j])*(1.0 / (2.0*dx)*(T[(i + 1) * wT + j] - T[(i - 1) * wT + j])) - 0.5*(v[i * wv + j] + v[i * wv + j - 1])*(1.0 / (2.0*dy)*(T[i * wT + j + 1] - T[i * wT + j - 1])) + 1 / (Re*Pr)*(1 / pow(dx, 2.0)*(T[(i + 1) * wT + j] - 2.0*T[i * wT + j] + T[(i - 1) * wT + j]) + 1 / pow(dy, 2.0)*(T[i * wT + j + 1] - 2 * T[i * wT + j] + T[i * wT + j - 1])));
-}
-		__syncthreads();
-}
-
 int main()
 {
     // output format
     float start_clock = clock();
-    ofstream f("result_gpu.txt"); // Solution Results
+    ofstream f("result_cpu.txt"); // Solution Results
     f.setf(ios::fixed | ios::showpoint);
     f << setprecision(5);
 
-    ofstream g("convergence_gpu.txt"); // Convergence history
+    ofstream g("convergence_cpu.txt"); // Convergence history
     g.setf(ios::fixed | ios::showpoint);
     g << setprecision(5);
     cout.setf(ios::fixed | ios::showpoint);
     cout << setprecision(5);
 
     // Input parameters 
-    float Re, Pr, Fr, T_L, T_0, T_amb, dx, dy, t, eps, beta, iter, maxiter, tf, st, counter, column, u_wind, T_R, Lx, Ly;
+    float Re, Pr, Fr, T_L, T_0, T_amb, ni, nj, dx, dy, t, ny, nx, eps, beta, iter, maxiter, tf, st, counter, column, u_wind, T_R, Lx, Ly;
     Lx = 4.0; Ly = 5.0; // Domain dimensions
-    int ni = 2.0; // Number of nodes per unit length in x direction
-    int nj = 2.0; // Number of nodes per unit length in y direction
-    int nx = Lx * ni; int ny = Ly * nj; // Number of Nodes in each direction
+    ni = 2.0; // Number of nodes per unit length in x direction
+    nj = 2.0; // Number of nodes per unit length in y direction
+    nx = Lx * ni; ny = Ly * nj; // Number of Nodes in each direction
     u_wind = 1; // Reference velocity
     st = 0.00005; // Total variance criteria
     eps = 0.001; // Pressure convergence criteria
@@ -70,31 +51,32 @@ int main()
     // Records number of clicks a step takes
     std::map<string, uint32_t> stepTimingAccumulator;
 
-    // Host Vectors
+    // Vectors
 
-    thrust::host_vector<float> u(nx * (ny + 1));
-    thrust::host_vector<float> us(nx*(ny + 1));
-    thrust::host_vector<float> uold(nx * (ny + 1));
-    int wu = ny + 1;
+    vector<float> u(nx * (ny + 1), 0);
+    vector<float> us(nx*(ny + 1), 0);
+    vector<float> uold(nx * (ny + 1), 0);
+    float wu = ny + 1;
 
-    thrust::host_vector<float> v((nx + 1) * ny);
-    thrust::host_vector<float> vs((nx + 1) * ny);
-    thrust::host_vector<float> vold((nx + 1) * ny);
-    int wv = ny;
+    vector<float> v((nx + 1) * ny, 0);
+    vector<float> vs((nx + 1) * ny, 0);
+    vector<float> vold((nx + 1) * ny, 0);
+    float wv = ny;
 
-    thrust::host_vector<float> p((nx + 1) * (ny + 1));
-    int wp = ny + 1;
+    vector<float> p((nx + 1) * (ny + 1), 0);
+    float wp = ny + 1;
 
-    thrust::host_vector<float> T((nx + 1) * (ny + 1));
-    int wT = ny + 1;
+    vector<float> T((nx + 1) * (ny + 1), T_0/T_amb);     // Initializing the flow variable (Temperature)  
+    // Boundary conditions for T (Initialization)
+    float wT = ny + 1;
 
-    thrust::host_vector<float> Told((nx + 1) * (ny + 1));
-    thrust::host_vector<float> om(nx * ny);
-    thrust::host_vector<float> vc(nx * ny);
-    thrust::host_vector<float> uc(nx * ny);
-    thrust::host_vector<float> pc(nx * ny);
-    thrust::host_vector<float> Tc(nx*ny);
-    int wc = ny;
+    vector<float> Told((nx + 1) * (ny + 1), 0);
+    vector<float> om(nx * ny, 0);
+    vector<float> vc(nx * ny, 0);
+    vector<float> uc(nx * ny, 0);
+    vector<float> pc(nx * ny, 0);
+    vector<float> Tc(nx*ny, 0);
+    float wc = ny;
 
     // Time step size stability criterion
 
@@ -118,16 +100,8 @@ int main()
     
     //......................................................................................
     // Step 0 - It can be parallelized
-    // Initializing the flow variable (Temperature)  
-    // Boundary conditions for T (Initialization)
+
     int step0_start = clock();
-    for (int i = 0; i < nx + 1; i++)
-    {
-        for (int j = 0; j < ny + 1; j++)
-        {
-            T[i * wT + j] = T_0 / T_amb;
-        } // end for j
-    } // end for i
     //......................................................................................
     int step0_end = clock();
     stepTimingAccumulator["Step 0, Initializing Temperature"] += step0_end - step0_start;
@@ -413,38 +387,16 @@ int main()
         // Step 4 - It can be parallelized
         // Solving for temperature
         int step4_start = clock();
-	
-        thrust::device_vector<float> d_T = T;
-        thrust::device_vector<float> d_Told = Told;
-	thrust::device_vector<float> d_u = u;
-	thrust::device_vector<float> d_v = v;
-	
-/*        for (int i = 1; i < nx; i++)
+	Told = T;
+        for (int i = 1; i < nx; i++)
         {
             for (int j = 1; j < ny; j++)
             {
-                Told[i * wT + j] = T[i * wT + j];
-                T[i * wT + j] = T[i * wT + j] + dt*(-0.5*(u[i * wu + j] + u[(i - 1) * wu + j])*(1.0 / (2.0*dx)*(T[(i + 1) * wT + j] - T[(i - 1) * wT + j])) - 0.5*(v[i * wv + j] + v[i * wv + j - 1])*(1.0 / (2.0*dy)*(T[i * wT + j + 1] - T[i * wT + j - 1])) + 1 / (Re*Pr)*(1 / pow(dx, 2.0)*(T[(i + 1) * wT + j] - 2.0*T[i * wT + j] + T[(i - 1) * wT + j]) + 1 / pow(dy, 2.0)*(T[i * wT + j + 1] - 2 * T[i * wT + j] + T[i * wT + j - 1])));
+
+                T[i * wT + j] = Told[i * wT + j] + dt*(-0.5*(u[i * wu + j] + u[(i - 1) * wu + j])*(1.0 / (2.0*dx)*(Told[(i + 1) * wT + j] - Told[(i - 1) * wT + j])) - 0.5*(v[i * wv + j] + v[i * wv + j - 1])*(1.0 / (2.0*dy)*(Told[i * wT + j + 1] - Told[i * wT + j - 1])) + 1 / (Re*Pr)*(1 / pow(dx, 2.0)*(Told[(i + 1) * wT + j] - 2.0*Told[i * wT + j] + Told[(i - 1) * wT + j]) + 1 / pow(dy, 2.0)*(Told[i * wT + j + 1] - 2 * Told[i * wT + j] + Told[i * wT + j - 1])));
             } // end for j
         } // end for i
-*/	
-	int gridsize_x = nx/BLOCK_SIZE + 1;
-	int gridsize_y = ny/BLOCK_SIZE + 1;
 
-        dim3 dimgrid(gridsize_x, gridsize_y, 1); // The grid has #gridsize blocks in x and 1 block in y and 1 block in z direction
-        dim3 dimblock(BLOCK_SIZE, BLOCK_SIZE, 1);
-
-	float *ptr_u = thrust::raw_pointer_cast(&d_u[0]);
-	float *ptr_v = thrust::raw_pointer_cast(&d_v[0]);
-	float *ptr_T = thrust::raw_pointer_cast(&d_T[0]);
-	float *ptr_Told = thrust::raw_pointer_cast(&d_Told[0]);
-
-//(int nx, int ny, int wu, int wv, int wT, float dx, float dy, float dt, float Re, float Pr, float *d_u, float *d_v, float *d_Told, float *d_T)
-	Temperature_solver<<<dimgrid, dimblock>>>(nx, ny, wu, wv, wT, dx, dy, dt, Re, Pr, ptr_u, ptr_v, ptr_Told, ptr_T);
-
-	thrust::copy(d_Told.begin(), d_Told.end(), Told.begin());
-	thrust::copy(d_T.begin(), d_T.end(), T.begin());
-	
         int step4_end = clock();
         stepTimingAccumulator["Step 4 - Solving for temperature"] += step4_end - step4_start;
         //................................................................................................
