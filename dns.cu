@@ -22,11 +22,8 @@ int i = blockIdx.x * blockDim.x + threadIdx.x;
 int j = blockIdx.y * blockDim.y + threadIdx.y;
 
 	if (i > 0 && i < nx && j > 0 && j < ny){
-
-                Told[i * wT + j] = T[i * wT + j];
-                T[i * wT + j] = T[i * wT + j] + dt*(-0.5*(u[i * wu + j] + u[(i - 1) * wu + j])*(1.0 / (2.0*dx)*(T[(i + 1) * wT + j] - T[(i - 1) * wT + j])) - 0.5*(v[i * wv + j] + v[i * wv + j - 1])*(1.0 / (2.0*dy)*(T[i * wT + j + 1] - T[i * wT + j - 1])) + 1 / (Re*Pr)*(1 / pow(dx, 2.0)*(T[(i + 1) * wT + j] - 2.0*T[i * wT + j] + T[(i - 1) * wT + j]) + 1 / pow(dy, 2.0)*(T[i * wT + j + 1] - 2 * T[i * wT + j] + T[i * wT + j - 1])));
+                T[i * wT + j] = Told[i * wT + j] + dt*(-0.5*(u[i * wu + j] + u[(i - 1) * wu + j])*(1.0 / (2.0*dx)*(Told[(i + 1) * wT + j] - Told[(i - 1) * wT + j])) - 0.5*(v[i * wv + j] + v[i * wv + j - 1])*(1.0 / (2.0*dy)*(Told[i * wT + j + 1] - Told[i * wT + j - 1])) + 1 / (Re*Pr)*(1 / pow(dx, 2.0)*(Told[(i + 1) * wT + j] - 2.0*Told[i * wT + j] + Told[(i - 1) * wT + j]) + 1 / pow(dy, 2.0)*(Told[i * wT + j + 1] - 2 * Told[i * wT + j] + Told[i * wT + j - 1])));
 }
-		__syncthreads();
 }
 
 int main()
@@ -46,15 +43,15 @@ int main()
     // Input parameters 
     float Re, Pr, Fr, T_L, T_0, T_amb, dx, dy, t, eps, beta, iter, maxiter, tf, st, counter, column, u_wind, T_R, Lx, Ly;
     Lx = 4.0; Ly = 5.0; // Domain dimensions
-    int ni = 2.0; // Number of nodes per unit length in x direction
-    int nj = 2.0; // Number of nodes per unit length in y direction
+    int ni = 10.0; // Number of nodes per unit length in x direction
+    int nj = 10.0; // Number of nodes per unit length in y direction
     int nx = Lx * ni; int ny = Ly * nj; // Number of Nodes in each direction
     u_wind = 1; // Reference velocity
     st = 0.00005; // Total variance criteria
     eps = 0.001; // Pressure convergence criteria
     tf = 100.0; // Final time step
     Pr = 0.5*(0.709 + 0.711); // Prandtl number
-    Re = 30.0; Fr = 0.3; // Non-dimensional numbers for inflow conditions
+    Re = 300.0; Fr = 0.3; // Non-dimensional numbers for inflow conditions
     dx = Lx / (nx - 1); dy = Ly / (ny - 1); // dx and dy
     beta = 1.4; // Successive over relaxation factor (SOR)
     t = 0; // Initial time step
@@ -72,29 +69,37 @@ int main()
 
     // Host Vectors
 
-    thrust::host_vector<float> u(nx * (ny + 1));
-    thrust::host_vector<float> us(nx*(ny + 1));
-    thrust::host_vector<float> uold(nx * (ny + 1));
+    thrust::host_vector<float> u(nx * (ny + 1), 0);
+    thrust::host_vector<float> us(nx*(ny + 1), 0);
+    thrust::host_vector<float> uold(nx * (ny + 1), 0);
     int wu = ny + 1;
 
-    thrust::host_vector<float> v((nx + 1) * ny);
-    thrust::host_vector<float> vs((nx + 1) * ny);
-    thrust::host_vector<float> vold((nx + 1) * ny);
+    thrust::host_vector<float> v((nx + 1) * ny, 0);
+    thrust::host_vector<float> vs((nx + 1) * ny, 0);
+    thrust::host_vector<float> vold((nx + 1) * ny, 0);
     int wv = ny;
 
-    thrust::host_vector<float> p((nx + 1) * (ny + 1));
+    thrust::host_vector<float> p((nx + 1) * (ny + 1), 0);
     int wp = ny + 1;
 
-    thrust::host_vector<float> T((nx + 1) * (ny + 1));
+    thrust::host_vector<float> T((nx + 1) * (ny + 1), T_0 / T_amb);     // Initializing the flow variable (Temperature)  
+    // Boundary conditions for T (Initialization)
     int wT = ny + 1;
 
-    thrust::host_vector<float> Told((nx + 1) * (ny + 1));
-    thrust::host_vector<float> om(nx * ny);
-    thrust::host_vector<float> vc(nx * ny);
-    thrust::host_vector<float> uc(nx * ny);
-    thrust::host_vector<float> pc(nx * ny);
-    thrust::host_vector<float> Tc(nx*ny);
+    thrust::host_vector<float> Told((nx + 1) * (ny + 1), 0);
+    thrust::host_vector<float> om(nx * ny, 0);
+    thrust::host_vector<float> vc(nx * ny, 0);
+    thrust::host_vector<float> uc(nx * ny, 0);
+    thrust::host_vector<float> pc(nx * ny, 0);
+    thrust::host_vector<float> Tc(nx*ny, 0);
     int wc = ny;
+
+    // Device vectors
+
+        thrust::device_vector<float> d_T(T.size(), 0); 
+        thrust::device_vector<float> d_Told(T.size(), 0);
+	thrust::device_vector<float> d_u(u.size(), 0);
+	thrust::device_vector<float> d_v(v.size(),0);
 
     // Time step size stability criterion
 
@@ -118,16 +123,7 @@ int main()
     
     //......................................................................................
     // Step 0 - It can be parallelized
-    // Initializing the flow variable (Temperature)  
-    // Boundary conditions for T (Initialization)
     int step0_start = clock();
-    for (int i = 0; i < nx + 1; i++)
-    {
-        for (int j = 0; j < ny + 1; j++)
-        {
-            T[i * wT + j] = T_0 / T_amb;
-        } // end for j
-    } // end for i
     //......................................................................................
     int step0_end = clock();
     stepTimingAccumulator["Step 0, Initializing Temperature"] += step0_end - step0_start;
@@ -413,21 +409,12 @@ int main()
         // Step 4 - It can be parallelized
         // Solving for temperature
         int step4_start = clock();
-	
-        thrust::device_vector<float> d_T = T;
-        thrust::device_vector<float> d_Told = Told;
-	thrust::device_vector<float> d_u = u;
-	thrust::device_vector<float> d_v = v;
-	
-/*        for (int i = 1; i < nx; i++)
-        {
-            for (int j = 1; j < ny; j++)
-            {
-                Told[i * wT + j] = T[i * wT + j];
-                T[i * wT + j] = T[i * wT + j] + dt*(-0.5*(u[i * wu + j] + u[(i - 1) * wu + j])*(1.0 / (2.0*dx)*(T[(i + 1) * wT + j] - T[(i - 1) * wT + j])) - 0.5*(v[i * wv + j] + v[i * wv + j - 1])*(1.0 / (2.0*dy)*(T[i * wT + j + 1] - T[i * wT + j - 1])) + 1 / (Re*Pr)*(1 / pow(dx, 2.0)*(T[(i + 1) * wT + j] - 2.0*T[i * wT + j] + T[(i - 1) * wT + j]) + 1 / pow(dy, 2.0)*(T[i * wT + j + 1] - 2 * T[i * wT + j] + T[i * wT + j - 1])));
-            } // end for j
-        } // end for i
-*/	
+	Told = T;
+        d_T = T; 
+        d_Told = Told;
+	d_u = u;
+	d_v = v;
+		
 	int gridsize_x = nx/BLOCK_SIZE + 1;
 	int gridsize_y = ny/BLOCK_SIZE + 1;
 
@@ -439,12 +426,9 @@ int main()
 	float *ptr_T = thrust::raw_pointer_cast(&d_T[0]);
 	float *ptr_Told = thrust::raw_pointer_cast(&d_Told[0]);
 
-//(int nx, int ny, int wu, int wv, int wT, float dx, float dy, float dt, float Re, float Pr, float *d_u, float *d_v, float *d_Told, float *d_T)
 	Temperature_solver<<<dimgrid, dimblock>>>(nx, ny, wu, wv, wT, dx, dy, dt, Re, Pr, ptr_u, ptr_v, ptr_Told, ptr_T);
+	T = d_T;
 
-	thrust::copy(d_Told.begin(), d_Told.end(), Told.begin());
-	thrust::copy(d_T.begin(), d_T.end(), T.begin());
-	
         int step4_end = clock();
         stepTimingAccumulator["Step 4 - Solving for temperature"] += step4_end - step4_start;
         //................................................................................................
