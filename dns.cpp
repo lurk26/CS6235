@@ -53,28 +53,29 @@ int main()
 
     // Vectors
 
-    vector<float> u(nx * (ny + 1));
-    vector<float> us(nx*(ny + 1));
-    vector<float> uold(nx * (ny + 1));
+    vector<float> u(nx * (ny + 1), 0);
+    vector<float> us(nx*(ny + 1), 0);
+    vector<float> uold(nx * (ny + 1), 0);
     float wu = ny + 1;
 
-    vector<float> v((nx + 1) * ny);
-    vector<float> vs((nx + 1) * ny);
-    vector<float> vold((nx + 1) * ny);
+    vector<float> v((nx + 1) * ny, 0);
+    vector<float> vs((nx + 1) * ny, 0);
+    vector<float> vold((nx + 1) * ny, 0);
     float wv = ny;
 
-    vector<float> p((nx + 1) * (ny + 1));
+    vector<float> p((nx + 1) * (ny + 1), 0);
     float wp = ny + 1;
 
-    vector<float> T((nx + 1) * (ny + 1));
+    vector<float> T((nx + 1) * (ny + 1), T_0/T_amb);     // Initializing the flow variable (Temperature)  
+    // Boundary conditions for T (Initialization)
     float wT = ny + 1;
 
-    vector<float> Told((nx + 1) * (ny + 1));
-    vector<float> om(nx * ny);
-    vector<float> vc(nx * ny);
-    vector<float> uc(nx * ny);
-    vector<float> pc(nx * ny);
-    vector<float> Tc(nx*ny);
+    vector<float> Told((nx + 1) * (ny + 1), 0);
+    vector<float> om(nx * ny, 0);
+    vector<float> vc(nx * ny, 0);
+    vector<float> uc(nx * ny, 0);
+    vector<float> pc(nx * ny, 0);
+    vector<float> Tc(nx*ny, 0);
     float wc = ny;
 
     // Time step size stability criterion
@@ -99,16 +100,8 @@ int main()
     
     //......................................................................................
     // Step 0 - It can be parallelized
-    // Initializing the flow variable (Temperature)  
-    // Boundary conditions for T (Initialization)
+
     int step0_start = clock();
-    for (int i = 0; i < nx + 1; i++)
-    {
-        for (int j = 0; j < ny + 1; j++)
-        {
-            T[i * wT + j] = T_0 / T_amb;
-        } // end for j
-    } // end for i
     //......................................................................................
     int step0_end = clock();
     stepTimingAccumulator["Step 0, Initializing Temperature"] += step0_end - step0_start;
@@ -394,14 +387,16 @@ int main()
         // Step 4 - It can be parallelized
         // Solving for temperature
         int step4_start = clock();
+	Told = T;
         for (int i = 1; i < nx; i++)
         {
             for (int j = 1; j < ny; j++)
             {
-                Told[i * wT + j] = T[i * wT + j];
-                T[i * wT + j] = T[i * wT + j] + dt*(-0.5*(u[i * wu + j] + u[(i - 1) * wu + j])*(1.0 / (2.0*dx)*(T[(i + 1) * wT + j] - T[(i - 1) * wT + j])) - 0.5*(v[i * wv + j] + v[i * wv + j - 1])*(1.0 / (2.0*dy)*(T[i * wT + j + 1] - T[i * wT + j - 1])) + 1 / (Re*Pr)*(1 / pow(dx, 2.0)*(T[(i + 1) * wT + j] - 2.0*T[i * wT + j] + T[(i - 1) * wT + j]) + 1 / pow(dy, 2.0)*(T[i * wT + j + 1] - 2 * T[i * wT + j] + T[i * wT + j - 1])));
+
+                T[i * wT + j] = Told[i * wT + j] + dt*(-0.5*(u[i * wu + j] + u[(i - 1) * wu + j])*(1.0 / (2.0*dx)*(Told[(i + 1) * wT + j] - Told[(i - 1) * wT + j])) - 0.5*(v[i * wv + j] + v[i * wv + j - 1])*(1.0 / (2.0*dy)*(Told[i * wT + j + 1] - Told[i * wT + j - 1])) + 1 / (Re*Pr)*(1 / pow(dx, 2.0)*(Told[(i + 1) * wT + j] - 2.0*Told[i * wT + j] + Told[(i - 1) * wT + j]) + 1 / pow(dy, 2.0)*(Told[i * wT + j + 1] - 2 * Told[i * wT + j] + Told[i * wT + j - 1])));
             } // end for j
         } // end for i
+
         int step4_end = clock();
         stepTimingAccumulator["Step 4 - Solving for temperature"] += step4_end - step4_start;
         //................................................................................................
