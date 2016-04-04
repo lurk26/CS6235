@@ -8,34 +8,31 @@
 #include <string>
 #include <map>
 #include <stdint.h>
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
 
 using namespace std;
 int main()
 {
-    // output format
     float start_clock = clock();
-    ofstream f("result_gpu.txt"); // Solution Results
+    ofstream f("result_cpu.txt"); // Solution Results
     f.setf(ios::fixed | ios::showpoint);
     f << setprecision(5);
 
-    ofstream g("convergence_gpu.txt"); // Convergence history
+    ofstream g("convergence_cpu.txt"); // Convergence history
     g.setf(ios::fixed | ios::showpoint);
     g << setprecision(5);
     cout.setf(ios::fixed | ios::showpoint);
     cout << setprecision(5);
 
+    float T_B, Re, Pr, Fr, T_L, T_0, T_amb, h, dx, dy, t, ny, nx, dt, error, eps, abs, beta, iter, maxiter, tf, st, pold, counter, column, u_wind, T_R, Lx, Ly, viscosity;
+
     // Input parameters 
-    float Re, Pr, Fr, T_L, T_0, T_amb, ni, nj, dx, dy, t, ny, nx, eps, beta, iter, maxiter, tf, st, counter, column, u_wind, T_R, Lx, Ly;
-    Lx = 4.0; Ly = 5.0; // Domain dimensions
-    ni = 2.0; // Number of nodes per unit length in x direction
-    nj = 2.0; // Number of nodes per unit length in y direction
-    nx = Lx * ni; ny = Ly * nj; // Number of Nodes in each direction
+    Lx = 2 * 2.0; Ly = 5.0; // Domain dimensions
+    nx = Lx * 2.0; ny = Ly * 2.0; // Grid size
     u_wind = 1; // Reference velocity
+    viscosity = 0.5*(16.97 + 18.90)*pow(10.0, -6.0); // Fluid viscosity
     st = 0.00005; // Total variance criteria
     eps = 0.001; // Pressure convergence criteria
-    tf = 100.0; // Final time step
+    tf = 1.0; // Final time step
     Pr = 0.5*(0.709 + 0.711); // Prandtl number
     Re = 30.0; Fr = 0.3; // Non-dimensional numbers for inflow conditions
     dx = Lx / (nx - 1); dy = Ly / (ny - 1); // dx and dy
@@ -55,34 +52,29 @@ int main()
 
     // Vectors
 
-    thrust::host_vector<float> u(nx * (ny + 1));
-    thrust::host_vector<float> us(nx*(ny + 1));
-    thrust::host_vector<float> uold(nx * (ny + 1));
-    float wu = ny + 1;
+    vector<vector<float> > u(nx, vector<float>(ny + 1));
+    vector<vector<float> > us(nx, vector<float>(ny + 1));
+    vector<vector<float> > uold(nx, vector<float>(ny + 1));
 
-    thrust::host_vector<float> v((nx + 1) * ny);
-    thrust::host_vector<float> vs((nx + 1) * ny);
-    thrust::host_vector<float> vold((nx + 1) * ny);
-    float wv = ny;
+    vector<vector<float> > v(nx + 1, vector<float>(ny));
+    vector<vector<float> > vs(nx + 1, vector<float>(ny));
+    vector<vector<float> > vold(nx + 1, vector<float>(ny));
 
-    thrust::host_vector<float> p((nx + 1) * (ny + 1));
-    float wp = ny + 1;
+    vector<vector<float> > p(nx + 1, vector<float>(ny + 1));
+    vector<vector<float> > T(nx + 1, vector<float>(ny + 1));
+    vector<vector<float> > Told(nx + 1, vector<float>(ny + 1));
 
-    thrust::host_vector<float> T((nx + 1) * (ny + 1));
-    float wT = ny + 1;
+    vector<vector<float> > sai(nx, vector<float>(ny));
+    vector<vector<float> > om(nx, vector<float>(ny));
+    vector<vector<float> > vc(nx, vector<float>(ny));
+    vector<vector<float> > uc(nx, vector<float>(ny));
 
-    thrust::host_vector<float> Told((nx + 1) * (ny + 1));
-    thrust::host_vector<float> om(nx * ny);
-    thrust::host_vector<float> vc(nx * ny);
-    thrust::host_vector<float> uc(nx * ny);
-    thrust::host_vector<float> pc(nx * ny);
-    thrust::host_vector<float> Tc(nx*ny);
-    float wc = ny;
+    vector<vector<float> > pc(nx, vector<float>(ny));
+    vector<vector<float> > Tc(nx, vector<float>(ny));
 
     // Time step size stability criterion
 
     float mt1 = 0.25*pow(dx, 2.0) / (1.0 / Re); float Rer = 1.0 / Re; float mt2 = 0.25*pow(dy, 2.0) / (1.0 / Re);
-    float dt;
 
     if (mt1 > Rer)
     {
@@ -108,7 +100,7 @@ int main()
     {
         for (int j = 0; j < ny + 1; j++)
         {
-            T[i * wT + j] = T_0 / T_amb;
+            T[i][j] = T_0 / T_amb;
         } // end for j
     } // end for i
     //......................................................................................
@@ -136,31 +128,31 @@ int main()
                 {
                     if (j*dy < 2.0)
                     {
-                        u[i * wu + j] = 0; // left wall - Final
+                        u[i][j] = 0; // left wall - Final
                     }
                     else
                     {
-                        u[i * wu + j] = u_wind; // left inlet - Final
+                        u[i][j] = u_wind; // left inlet - Final
                     }
                 }
                 else if (i == nx - 1 && j>0 && j < ny)
                 {
                     if (j*dy < 2.0)
                     {
-                        u[i * wu + j] = 0; // Right wall has 0 horizontal velocity - Final
+                        u[i][j] = 0; // Right wall has 0 horizontal velocity - Final
                     }
                     else
                     {
-                        u[i * wu + j] = u[(i - 1) * wu + j]; // right outlet - no velocity change
+                        u[i][j] = u[i - 1][j]; // right outlet - no velocity change
                     }
                 }
                 else if (j == 0)
                 {
-                    u[i * wu + j] = -u[i * wu + j + 1]; // bottom ghost - Final
+                    u[i][j] = -u[i][j + 1]; // bottom ghost - Final
                 }
                 else if (j == ny)
                 {
-                    u[i * wu + j] = u[i * wu + j - 1]; // upper ghost - Final
+                    u[i][j] = u[i][j - 1]; // upper ghost - Final
                 }
             } // end for j
         } // end for i
@@ -180,25 +172,25 @@ int main()
             {
                 if (j == 0 && i > 0 && i < nx)
                 {
-                    v[i * wv + j] = 0; // bottom wall - Final
+                    v[i][j] = 0; // bottom wall - Final
                 }
                 else if (j == ny - 1 && i > 0 && i < nx)
                 {
-                    v[i * wv + j] = v[i * wv + j - 1]; // upper wall - Final
+                    v[i][j] = v[i][j - 1]; // upper wall - Final
                 }
                 else if (i == 0)
                 {
-                    v[i * wv + j] = -v[(i + 1) * wv + j]; // left ghost (Left Wall and inlet has 0 vertical velocity) - Final
+                    v[i][j] = -v[i + 1][j]; // left ghost (Left Wall and inlet has 0 vertical velocity) - Final
                 }
                 else if (i == nx)
                 {
                     if (j*dy < 2.0)
                     {
-                        v[i * wv + j] = -v[(i - 1) * wv + j]; // right ghost (Right wall has 0 vertical velocity) - Final
+                        v[i][j] = -v[i - 1][j]; // right ghost (Right wall has 0 vertical velocity) - Final
                     }
                     else
                     {
-                        v[i * wv + j] = v[(i - 1) * wv + j]; // right outlet - no velocity gradient
+                        v[i][j] = v[i - 1][j]; // right outlet - no velocity gradient
                     }
                 }
             } // end for j
@@ -218,9 +210,9 @@ int main()
         {
             for (int j = 1; j < ny; j++)
             {
-                float vh = 1.0 / 4.0*(v[i * wv + j] + v[(i + 1) * wv + j] + v[i * wv + j - 1] + v[(i + 1) * wv + j - 1]); // v hat
-                float a = u[i * wu + j] * 1.0 / (2.0*dx)*(u[(i + 1) * wu + j] - u[(i - 1) * wu + j]) + vh*1.0 / (2.0*dy)*(u[i * wu + j + 1] - u[i * wu + j - 1]); // a
-                us[i * wu + j] = dt / Re*(1.0 / pow(dx, 2.0)*(u[(i + 1) * wu + j] - 2.0*u[i * wu + j] + u[(i - 1) * wu + j]) + 1.0 / pow(dy, 2.0)*(u[i * wu + j + 1] - 2.0*u[i * wu + j] + u[i * wu + j - 1])) - a*dt + u[i * wu + j]; // u star
+                float vh = 1.0 / 4.0*(v[i][j] + v[i + 1][j] + v[i][j - 1] + v[i + 1][j - 1]); // v hat
+                float a = u[i][j] * 1.0 / (2.0*dx)*(u[i + 1][j] - u[i - 1][j]) + vh*1.0 / (2.0*dy)*(u[i][j + 1] - u[i][j - 1]); // a
+                us[i][j] = dt / Re*(1.0 / pow(dx, 2.0)*(u[i + 1][j] - 2.0*u[i][j] + u[i - 1][j]) + 1.0 / pow(dy, 2.0)*(u[i][j + 1] - 2.0*u[i][j] + u[i][j - 1])) - a*dt + u[i][j]; // u star
             } // end for j
         } // end for i
 
@@ -231,9 +223,9 @@ int main()
         {
             for (int j = 1; j < ny - 1; j++)
             {
-                float uh = 1.0 / 4.0*(u[i * wu + j] + u[i * wu + j + 1] + u[(i - 1) * wu + j] + u[(i - 1) * wu + j + 1]);
-                float b = uh*1.0 / (2.0*dx)*(v[(i + 1) * wv + j] - v[(i - 1) * wv + j]) + v[i * wv + j] * 1.0 / (2.0*dy)*(v[i * wv + j + 1] - v[i * wv + j - 1]); // b
-                vs[i * wv + j] = dt / Re*(1.0 / pow(dx, 2.0)*(v[(i + 1) * wv + j] - 2.0*v[i * wv + j] + v[(i - 1) * wv + j]) + 1.0 / pow(dy, 2.0)*(v[i * wv + j + 1] - 2.0*v[i * wv + j] + v[i * wv + j - 1])) + dt / pow(Fr, 2.0)*(0.5*(T[i * wT + j] + T[i * wT + j - 1]) - 1) / (0.5*(T[i * wT + j] + T[i * wT + j - 1])) - b*dt + v[i * wv + j]; // v 
+                float uh = 1.0 / 4.0*(u[i][j] + u[i][j + 1] + u[i - 1][j] + u[i - 1][j + 1]);
+                float b = uh*1.0 / (2.0*dx)*(v[i + 1][j] - v[i - 1][j]) + v[i][j] * 1.0 / (2.0*dy)*(v[i][j + 1] - v[i][j - 1]); // b
+                vs[i][j] = dt / Re*(1.0 / pow(dx, 2.0)*(v[i + 1][j] - 2.0*v[i][j] + v[i - 1][j]) + 1.0 / pow(dy, 2.0)*(v[i][j + 1] - 2.0*v[i][j] + v[i][j - 1])) + dt / pow(Fr, 2.0)*(0.5*(T[i][j] + T[i][j - 1]) - 1) / (0.5*(T[i][j] + T[i][j - 1])) - b*dt + v[i][j]; // v 
             } // end for j
         } // end for i
 
@@ -242,7 +234,7 @@ int main()
 
         for (int i = 0; i < nx; i++)
         {
-            us[i * wu + 0] = -us[i * wu + 1]; // bottom ghost - Final
+            us[i][0] = -us[i][1]; // bottom ghost - Final
         } // end for j
 
         //...........................................................................................
@@ -250,33 +242,33 @@ int main()
         {
             if (j*dy < 2.0)
             {
-                us[0 * wu + j] = 0; // left wall - FInal
-                us[(nx - 1) * wu + j] = 0; // right wall - Final
+                us[0][j] = 0; // left wall - FInal
+                us[nx - 1][j] = 0; // right wall - Final
             }
             else
             {
-                us[0 * wu + j] = u_wind; // left inlet - Final
+                us[0][j] = u_wind; // left inlet - Final
             }
         }
         //...........................................................................................
 
         for (int j = 0; j < ny; j++)
         {
-            vs[0 * wv + j] = -vs[1 * wv + j]; // left ghost (Both wall and inlet have 0 vs) - Final
+            vs[0][j] = -vs[1][j]; // left ghost (Both wall and inlet have 0 vs) - Final
             if (j*dy < 2.0)
             {
-                vs[nx * wv + j] = -vs[(nx - 1) * wv + j]; // right ghost (Only the right wall - Final
+                vs[nx][j] = -vs[nx - 1][j]; // right ghost (Only the right wall - Final
             }
             else
             {
-                vs[nx * wv + j] = vs[(nx - 1) * wv + j]; // right outlet - no flux
+                vs[nx][j] = vs[nx - 1][j]; // right outlet - no flux
             }
         }
         //............................................................................................
 
         for (int i = 0; i < nx + 1; i++)
         {
-            vs[i * wv + 0] = 0; // Bottom wall - Final
+            vs[i][0] = 0; // Bottom wall - Final
         } // end for i
         //............................................................................................
 
@@ -290,58 +282,116 @@ int main()
         int step2_start = clock();
 
         float error = 1; iter = 0;
-	float diffp, pold;
+
         // Solve for pressure iteratively until it converges - Using Gauss Seidel SOR 
+
+// Cuda set up
+float *	p_h, us_h, vs_h;
+float error;
+p_h = new float[(nx+1)*(ny+1)];
+us_h = new float[nx*(ny+1)];
+vs_h = new float[(nx+1)*ny];
+
+	
+	for(int i = 0; i < nx; ++i)
+	  for(int j=0; j < ny+1; ++j)
+		us_h[i*wu + j] = us[i][j];	
+	
+	
+	for(int i = 0; i < nx+1; ++i)
+	  for(int j=0; j < ny; ++j)
+		vs_h[i*wv + j] = vs[i][j];	
+	
+	
+float * p_d, u_d, v_d, error_d;
+cudaMalloc(&p_d, (nx+1)*(ny+1)*sizeof(float));
+cudaMalloc(&u_v, (nx)*(ny+1)*sizeof(float));
+cudaMalloc(&v_d, (nx+1)*(ny)*sizeof(float));
+cudaMalloc(&error, sizeof(float));
+
+
+cudaMemcpy(u_d, u_h, sizeof(float)*(nx)*(ny+1), cudaMemcpyHostToDevice);
+cudaMemcpy(v_d, v_h, sizeof(float)*(nx+1)*(ny), cudaMemcpyHostToDevice);
+
+
         while (error > eps)
         {
             error = 0;
 
+	for(int i = 0; i < nx+1; ++i)
+	  for(int j=0; j < ny+1; ++j)
+		p_h[i*wp + j] = p[i][j];	
+	
+cudaMemcpy(p_d, p_h, sizeof(float)*(nx+1)*(ny+1), cudaMemcpyHostToDevice);
+__global PressureSolve(float * p_d, const float * u_d, const float * v_d, float* error, int wp, int wu, int wv)
+{
+	int i = threadIdx.x + blockDim.x*blockIdx.x;
+	int j = threadIdx.y + blockDim.y*blockIdx.y;
+
+float 	pold = p[i * wp + j];
+                    p[i * wp + j] = beta*pow(dx, 2.0)*pow(dy, 2.0) / (-2.0*(pow(dx, 2.0) + pow(dy, 2.0)))*(-1.0 / pow(dx, 2.0)*(p[(i + 1) * wp + j] + p[(i - 1) * wp + j] + p[i * wp + j + 1] + p[i * wp + j - 1]) + 1.0 / dt*(1.0 / dx*(u_d[i * wu + j] - u_d[(i - 1) * wu + j]) + 1.0 / dy*(v_d[i * wv + j] - v_d[i * wv + j - 1]))) + (1.0 - beta)*p[i * wp + j];
+                    abs = pow((p[i * wp + j] - pold), 2.0);
+                    atomicAdd(error,abs);
+}
+int blockSize = 32;
+
+PressureSolve<<< dim3( (ny+1)/blockSize + 1, (nx+1)/blockSize + 1) , dim3(blockSize,blockSize)>>>(p_d, u_d, v_d, error, wp, wu, wv);
+
+cudaMemcpy(p_h, p_d, sizeof(float)*(nx+1)*(ny+1), cudaDeviceToHost);
+cudaMemcpy(&error, error_d, sizeof(float), cudaDeviceToHost);
+
+
+	for(int i = 0; i < nx+1; ++i)
+	  for(int j=0; j < ny+1; ++j)
+		p[i][j] = p_h[i*wp + j];	
+
+/*
             //............................................................................................
             for (int i = 1; i < nx; i++)
             {
                 for (int j = 1; j < ny; j++)
                 {
-                    pold = p[i * wp + j];
-                    p[i * wp + j] = beta*pow(dx, 2.0)*pow(dy, 2.0) / (-2.0*(pow(dx, 2.0) + pow(dy, 2.0)))*(-1.0 / pow(dx, 2.0)*(p[(i + 1) * wp + j] + p[(i - 1) * wp + j] + p[i * wp + j + 1] + p[i * wp + j - 1]) + 1.0 / dt*(1.0 / dx*(us[i * wu + j] - us[(i - 1) * wu + j]) + 1.0 / dy*(vs[i * wv + j] - vs[i * wv + j - 1]))) + (1.0 - beta)*p[i * wp + j];
-                    diffp = pow((p[i * wp + j] - pold), 2.0);
-                    error = error + diffp;
+                    pold = p[i][j];
+                    p[i][j] = beta*pow(dx, 2.0)*pow(dy, 2.0) / (-2.0*(pow(dx, 2.0) + pow(dy, 2.0)))*(-1.0 / pow(dx, 2.0)*(p[i + 1][j] + p[i - 1][j] + p[i][j + 1] + p[i][j - 1]) + 1.0 / dt*(1.0 / dx*(us[i][j] - us[i - 1][j]) + 1.0 / dy*(vs[i][j] - vs[i][j - 1]))) + (1.0 - beta)*p[i][j];
+                    abs = pow((p[i][j] - pold), 2.0);
+                    error = error + abs;
                 } // end for j
             } // end for i
             //............................................................................................
             // boundary conditions for pressure
-
+*/
             for (int i = 0; i < nx + 1; i++)
             {
                 for (int j = 0; j < ny + 1; j++)
                 {
                     if (j == 0)
                     {
-                        p[i * wp + j] = p[i * wp + j + 1]; // bottom wall - Final
+                        p[i][j] = p[i][j + 1]; // bottom wall - Final
                     }
                     else if (j == ny)
                     {
-                        p[i * wp + j] = p[i * wp + j - 1]; // Upper - no flux
+                        p[i][j] = p[i][j - 1]; // Upper - no flux
                     }
                     else if (i == 0)
                     {
                         if (j*dy < 2.0)
                         {
-                            p[i * wp + j] = p[(i + 1) * wp + j]; // left wall - not the inlet - Final
+                            p[i][j] = p[i + 1][j]; // left wall - not the inlet - Final
                         }
                         else
                         {
-                            p[i * wp + j] = p[(i + 1) * wp + j];
+                            p[i][j] = p[i + 1][j];
                         }
                     }
                     else if (i == nx)
                     {
                         if (j*dy < 2.0)
                         {
-                            p[i * wp + j] = p[(i - 1) * wp + j]; // right wall - not the outlet - Final
+                            p[i][j] = p[i - 1][j]; // right wall - not the outlet - Final
                         }
                         else
                         {
-                            p[i * wp + j] = -p[(i - 1) * wp + j]; // pressure outlet - static pressure is zero - Final
+                            p[i][j] = -p[i - 1][j]; // pressure outlet - static pressure is zero - Final
                         }
                     }
                 } // end for j
@@ -372,8 +422,8 @@ int main()
         {
             for (int j = 1; j < ny; j++)
             {
-                uold[i * wu + j] = u[i * wu + j];
-                u[i * wu + j] = us[i * wu + j] - dt / dx*(p[(i + 1) * wp + j] - p[i * wp + j]);
+                uold[i][j] = u[i][j];
+                u[i][j] = us[i][j] - dt / dx*(p[i + 1][j] - p[i][j]);
             } // end for j
         } // end for i
         //................................................
@@ -384,8 +434,8 @@ int main()
         {
             for (int j = 1; j < ny - 1; j++)
             {
-                vold[i * wv + j] = v[i * wv + j];
-                v[i * wv + j] = vs[i * wv + j] - dt / dy*(p[i * wp + j + 1] - p[i * wp + j]);
+                vold[i][j] = v[i][j];
+                v[i][j] = vs[i][j] - dt / dy*(p[i][j + 1] - p[i][j]);
             } // end for j
         } // end for i
         int step3_end = clock();
@@ -400,8 +450,8 @@ int main()
         {
             for (int j = 1; j < ny; j++)
             {
-                Told[i * wT + j] = T[i * wT + j];
-                T[i * wT + j] = T[i * wT + j] + dt*(-0.5*(u[i * wu + j] + u[(i - 1) * wu + j])*(1.0 / (2.0*dx)*(T[(i + 1) * wT + j] - T[(i - 1) * wT + j])) - 0.5*(v[i * wv + j] + v[i * wv + j - 1])*(1.0 / (2.0*dy)*(T[i * wT + j + 1] - T[i * wT + j - 1])) + 1 / (Re*Pr)*(1 / pow(dx, 2.0)*(T[(i + 1) * wT + j] - 2.0*T[i * wT + j] + T[(i - 1) * wT + j]) + 1 / pow(dy, 2.0)*(T[i * wT + j + 1] - 2 * T[i * wT + j] + T[i * wT + j - 1])));
+                Told[i][j] = T[i][j];
+                T[i][j] = T[i][j] + dt*(-0.5*(u[i][j] + u[i - 1][j])*(1.0 / (2.0*dx)*(T[i + 1][j] - T[i - 1][j])) - 0.5*(v[i][j] + v[i][j - 1])*(1.0 / (2.0*dy)*(T[i][j + 1] - T[i][j - 1])) + 1 / (Re*Pr)*(1 / pow(dx, 2.0)*(T[i + 1][j] - 2.0*T[i][j] + T[i - 1][j]) + 1 / pow(dy, 2.0)*(T[i][j + 1] - 2 * T[i][j] + T[i][j - 1])));
             } // end for j
         } // end for i
         int step4_end = clock();
@@ -419,28 +469,28 @@ int main()
             {
                 if (j == 0)
                 {
-                    T[i * wT + j] = T[i * wT + j + 1]; // bottom wall - Insulated - no flux - Final
+                    T[i][j] = T[i][j + 1]; // bottom wall - Insulated - no flux - Final
                 }
                 else if (j == ny)
                 {
-                    T[i * wT + j] = 2.0*(T_0) / T_amb - T[i * wT + j - 1]; // upper boundary - lid with ambient temperature (as air) - Final
+                    T[i][j] = 2.0*(T_0) / T_amb - T[i][j - 1]; // upper boundary - lid with ambient temperature (as air) - Final
                 }
                 else if (i == 0)
                 {
                     if (j*dy < 2.0)
                     {
-                        T[i * wT + j] = 2.0*T_L / T_amb - T[(i + 1) * wT + j]; // left wall at T_L - Constant Temperature - Final
+                        T[i][j] = 2.0*T_L / T_amb - T[i + 1][j]; // left wall at T_L - Constant Temperature - Final
                     }
                     else
                     {
-                        T[i * wT + j] = 2.0*T_0 / T_amb - T[(i + 1) * wT + j]; // left inlet at T_0 (initial temperature) - Final
+                        T[i][j] = 2.0*T_0 / T_amb - T[i + 1][j]; // left inlet at T_0 (initial temperature) - Final
                     }
                 }
                 else if (i == nx)
                 {
                     if (j*dy < 2.0)
                     {
-                        T[i * wT + j] = 2.0*T_R / T_amb - T[(i - 1) * wT + j]; // right wall at T_R - Final
+                        T[i][j] = 2.0*T_R / T_amb - T[i - 1][j]; // right wall at T_R - Final
                     }
                 }
             } // end for j
@@ -454,13 +504,13 @@ int main()
         // Checking the steady state condition
         int step5_start = clock();
 
-        float TV, diffv; TV = 0;
+        float TVt, TV, TV2, TV3; TV = 0; TV2 = 0; TV3 = 0; float abs, abs2, abs3;
         for (int i = 1; i < nx - 1; i++)
         {
             for (int j = 1; j < ny - 2; j++)
             {
-                diffv = v[i * wv + j] - vold[i * wv + j];
-                TV = TV + pow(pow(diffv, 2), 0.5);
+                abs = v[i][j] - vold[i][j];
+                TV = TV + pow(pow(abs, 2), 0.5);
             } // end for i
         } // end for j
 
@@ -498,11 +548,12 @@ int main()
     {
         for (int j = 0; j < ny; j++)
         {
-            vc[i * wc + j] = 1.0 / 2.0*(v[(i + 1) * wv + j] + v[i * wv + j]);
-            pc[i * wc + j] = 1.0 / 4.0*(p[i * wp + j] + p[(i + 1) * wp + j] + p[i * wp + j + 1] + p[(i + 1) * wp + j + 1]);
-            uc[i * wc + j] = 1.0 / 2.0*(u[i*wu + j] + u[i * wu + j + 1]);
-            om[i * wc + j] = 1.0 / dx*(v[(i + 1) * wv + j] - v[i * wv + j]) - 1.0 / dy*(u[i * wu + j + 1] - u[i * wu + j]);
-            Tc[i * wc + j] = 1.0 / 4.0*(T[i * wT + j] + T[(i + 1) * wT + j] + T[i * wT + j + 1] + T[(i + 1) * wT + j + 1]);
+            vc[i][j] = 1.0 / 2.0*(v[i + 1][j] + v[i][j]);
+            pc[i][j] = 1.0 / 4.0*(p[i][j] + p[i + 1][j] + p[i][j + 1] + p[i + 1][j + 1]);
+            uc[i][j] = 1.0 / 2.0*(u[i][j] + u[i][j + 1]);
+            om[i][j] = 1.0 / dx*(v[i + 1][j] - v[i][j]) - 1.0 / dy*(u[i][j + 1] - u[i][j]);
+            Tc[i][j] = 1.0 / 4.0*(T[i][j] + T[i + 1][j] + T[i][j + 1] + T[i + 1][j + 1]);
+
         } // end for j
     } // end for i
     //........................................................................................................
@@ -515,7 +566,7 @@ int main()
     {
         for (int i = 0; i < nx; i++)
         {
-            f << setw(15) << t - dt << setw(15) << i*dx << setw(15) << j*dy << setw(15) << uc[i * wc + j] << setw(15) << vc[i * wc + j] << setw(15) << pc[i * wc + j] << setw(15) << Tc[i * ny + j] * T_amb - 273.15 << setw(15) << om[i * wc + j] << endl;
+            f << setw(15) << t - dt << setw(15) << i*dx << setw(15) << j*dy << setw(15) << uc[i][j] << setw(15) << vc[i][j] << setw(15) << pc[i][j] << setw(15) << Tc[i][j] * T_amb - 273.15 << setw(15) << om[i][j] << endl;
         } // end for i
     } // end for j
     //.........................................................................................................

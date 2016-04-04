@@ -8,19 +8,17 @@
 #include <string>
 #include <map>
 #include <stdint.h>
-#include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
 
 using namespace std;
 int main()
 {
     // output format
     float start_clock = clock();
-    ofstream f("result_gpu.txt"); // Solution Results
+    ofstream f("result_cpu.txt"); // Solution Results
     f.setf(ios::fixed | ios::showpoint);
     f << setprecision(5);
 
-    ofstream g("convergence_gpu.txt"); // Convergence history
+    ofstream g("convergence_cpu.txt"); // Convergence history
     g.setf(ios::fixed | ios::showpoint);
     g << setprecision(5);
     cout.setf(ios::fixed | ios::showpoint);
@@ -55,28 +53,28 @@ int main()
 
     // Vectors
 
-    thrust::host_vector<float> u(nx * (ny + 1));
-    thrust::host_vector<float> us(nx*(ny + 1));
-    thrust::host_vector<float> uold(nx * (ny + 1));
+    vector<float> u(nx * (ny + 1));
+    vector<float> us(nx*(ny + 1));
+    vector<float> uold(nx * (ny + 1));
     float wu = ny + 1;
 
-    thrust::host_vector<float> v((nx + 1) * ny);
-    thrust::host_vector<float> vs((nx + 1) * ny);
-    thrust::host_vector<float> vold((nx + 1) * ny);
+    vector<float> v((nx + 1) * ny);
+    vector<float> vs((nx + 1) * ny);
+    vector<float> vold((nx + 1) * ny);
     float wv = ny;
 
-    thrust::host_vector<float> p((nx + 1) * (ny + 1));
+    vector<float> p((nx + 1) * (ny + 1));
     float wp = ny + 1;
 
-    thrust::host_vector<float> T((nx + 1) * (ny + 1));
+    vector<float> T((nx + 1) * (ny + 1));
     float wT = ny + 1;
 
-    thrust::host_vector<float> Told((nx + 1) * (ny + 1));
-    thrust::host_vector<float> om(nx * ny);
-    thrust::host_vector<float> vc(nx * ny);
-    thrust::host_vector<float> uc(nx * ny);
-    thrust::host_vector<float> pc(nx * ny);
-    thrust::host_vector<float> Tc(nx*ny);
+    vector<float> Told((nx + 1) * (ny + 1));
+    vector<float> om(nx * ny);
+    vector<float> vc(nx * ny);
+    vector<float> uc(nx * ny);
+    vector<float> pc(nx * ny);
+    vector<float> Tc(nx*ny);
     float wc = ny;
 
     // Time step size stability criterion
