@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <string>
 #include <map>
+#include <stdint.h>
 
 using namespace std;
 int main()
