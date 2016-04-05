@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
+#include <thrust/reduce.h>
 
 using namespace std;
 
@@ -28,6 +29,58 @@ int j = blockIdx.y * blockDim.y + threadIdx.y;
 }
 		__syncthreads();
 }
+
+
+
+__global__ void PressureSolve(float * p_d, float * abs_d, const float * us_d, const float * vs_d, float error, int p_xlength, int p_ylength, int wp, int wu, int wv, float beta, float dx, float dy, float dt)
+{
+    
+    int i = threadIdx.x + blockDim.x*blockIdx.x;
+    int j = threadIdx.y + blockDim.y*blockIdx.y;
+    
+    
+    if (i > 0 && i < p_xlength && j > 0 && j < p_ylength)
+    {
+        float pold = p_d[i * wp + j];    // Store previous pressures in pold
+        //__syncthreads();
+        
+        p_d[i * wp + j] = beta*pow(dx, 2.0)*pow(dy, 2.0) / (-2.0*(pow(dx, 2.0) + pow(dy, 2.0)))*(-1.0 / pow(dx, 2.0)*(p_d[(i + 1) * wp + j] + p_d[(i - 1) * wp + j] + p_d[i * wp + j + 1] + p_d[i * wp + j - 1]) + 1.0 / dt*(1.0 / dx*(us_d[i * wu + j] - us_d[(i - 1) * wu + j]) + 1.0 / dy*(vs_d[i * wv + j] - vs_d[i * wv + j - 1]))) + (1.0 - beta)*p_d[i * wp + j];
+        
+        abs_d[i * wp + j] = pow((p_d[i * wp + j] - pold), 2.0);
+        
+        //__syncthreads
+        
+        
+        
+    } // end if
+} // end global
+
+
+__global__ void PressureBC(float * p_d, int nx, int ny, int dy, int wp)
+{
+    
+    int i = threadIdx.x + blockDim.x*blockIdx.x;
+    int j = threadIdx.y + blockDim.y*blockIdx.y;
+    
+    if (i > 0 && i < nx + 1 && j == 0){
+        p_d[i * wp + j] = p_d[i * wp + j + 1]; // bottom wall - Final
+    }
+    if (i > 0 && i < nx + 1 && j == ny){
+        p_d[i * wp + j] = p_d[i * wp + j - 1]; // Upper - no flux
+    }
+    if (j > 0 && j < ny + 1 && i == 0){
+        p_d[i * wp + j] = p_d[(i + 1) * wp + j]; // left wall - not the inlet - Final
+    }
+    if (j > 0 && j < ny + 1 && i == nx && j*dy < 2.0){
+        p_d[i * wp + j] = p_d[(i - 1) * wp + j]; // right wall - not the outlet - Final
+    }
+    if (j > 0 && j < ny + 1 && i == nx && j*dy >= 2.0){
+        p_d[i * wp + j] = -p_d[(i - 1) * wp + j]; // pressure outlet - static pressure is zero - Final
+    }
+    
+}
+
+
 
 int main()
 {
@@ -52,7 +105,7 @@ int main()
     u_wind = 1; // Reference velocity
     st = 0.00005; // Total variance criteria
     eps = 0.001; // Pressure convergence criteria
-    tf = 100.0; // Final time step
+    tf = 1.0; // Final time step
     Pr = 0.5*(0.709 + 0.711); // Prandtl number
     Re = 30.0; Fr = 0.3; // Non-dimensional numbers for inflow conditions
     dx = Lx / (nx - 1); dy = Ly / (ny - 1); // dx and dy
@@ -83,7 +136,9 @@ int main()
     int wv = ny;
 
     thrust::host_vector<float> p((nx + 1) * (ny + 1));
+ //   thrust::host_vector<float> abs((nx + 1) * (ny + 1));
     int wp = ny + 1;
+
 
     thrust::host_vector<float> T((nx + 1) * (ny + 1));
     int wT = ny + 1;
@@ -95,6 +150,12 @@ int main()
     thrust::host_vector<float> pc(nx * ny);
     thrust::host_vector<float> Tc(nx*ny);
     int wc = ny;
+
+
+	thrust::device_vector<float> us_d(nx*(ny + 1));
+	thrust::device_vector<float> vs_d((nx + 1) * ny);
+        thrust::device_vector<float> p_d((nx + 1) * (ny + 1));
+        thrust::device_vector<float> abs_d((nx + 1) * (ny + 1));
 
     // Time step size stability criterion
 
@@ -300,83 +361,70 @@ int main()
         int step1_end = clock();
         stepTimingAccumulator["Step 1 - Solve for intermediate velocities"] += step1_end - step1_start;
 
+        
         //...............................................................................................
-        // Step 2 - It can be parallelized 
-        // This is the most expensive part of the code
+        // Step 2 - Parallel GPU version
         // Poisson equation for pressure
+       
+        
+	us_d = us;
+	vs_d = vs;
+        p_d = p;
+ //       abs_d = abs;
+        
         int step2_start = clock();
+        
+        // Cuda set up
+        int p_xlength = nx;
+        int p_ylength = ny;
+        
+        /*cudaMalloc((void**) &us_d, (nx)*(ny+1)*sizeof(float));
+        cudaMalloc((void**) &vs_d, (nx+1)*(ny)*sizeof(float));
+        cudaMalloc((void**) &p_d, (nx+1)*(ny+1)*sizeof(float));
+        cudaMalloc((void**) &abs_d, (nx+1)*(ny+1)*sizeof(float));*/
+        
+        /*cudaMemcpy(us_d, us, sizeof(float)*(nx)*(ny+1), cudaMemcpyHostToDevice);
+        cudaMemcpy(vs_d, vs, sizeof(float)*(nx+1)*(ny), cudaMemcpyHostToDevice);
+        cudaMemcpy(p_d, p, sizeof(float)*(nx+1)*(ny+1), cudaMemcpyHostToDevice);
+        cudaMemcpy(abs_d, abs, sizeof(float)*(nx+1)*(ny+1), cudaMemcpyHostToDevice);*/
 
+	float *ptr_us = thrust::raw_pointer_cast(&us_d[0]);
+	float *ptr_vs = thrust::raw_pointer_cast(&vs_d[0]);
+	float *ptr_p = thrust::raw_pointer_cast(&p_d[0]);
+	float *ptr_abs = thrust::raw_pointer_cast(&abs_d[0]);
+        
         float error = 1; iter = 0;
-	float diffp, pold;
-        // Solve for pressure iteratively until it converges - Using Gauss Seidel SOR 
-        while (error > eps)
-        {
-            error = 0;
+        
+        
+        // Begin SOR loop
+        while (error > eps){
+            
+            // SOR pressure solver
+            PressureSolve<<< dim3( (ny+1)/BLOCK_SIZE + 1, (nx+1)/BLOCK_SIZE + 1, 1) , dim3(BLOCK_SIZE,BLOCK_SIZE,1)>>>(ptr_p, ptr_abs, ptr_us, ptr_vs, error, p_xlength, p_ylength, wp, wu, wv, beta, dx, dy, dt);
+            
 
-            //............................................................................................
-            for (int i = 1; i < nx; i++)
-            {
-                for (int j = 1; j < ny; j++)
-                {
-                    pold = p[i * wp + j];
-                    p[i * wp + j] = beta*pow(dx, 2.0)*pow(dy, 2.0) / (-2.0*(pow(dx, 2.0) + pow(dy, 2.0)))*(-1.0 / pow(dx, 2.0)*(p[(i + 1) * wp + j] + p[(i - 1) * wp + j] + p[i * wp + j + 1] + p[i * wp + j - 1]) + 1.0 / dt*(1.0 / dx*(us[i * wu + j] - us[(i - 1) * wu + j]) + 1.0 / dy*(vs[i * wv + j] - vs[i * wv + j - 1]))) + (1.0 - beta)*p[i * wp + j];
-                    diffp = pow((p[i * wp + j] - pold), 2.0);
-                    error = error + diffp;
-                } // end for j
-            } // end for i
-            //............................................................................................
-            // boundary conditions for pressure
 
-            for (int i = 0; i < nx + 1; i++)
-            {
-                for (int j = 0; j < ny + 1; j++)
-                {
-                    if (j == 0)
-                    {
-                        p[i * wp + j] = p[i * wp + j + 1]; // bottom wall - Final
-                    }
-                    else if (j == ny)
-                    {
-                        p[i * wp + j] = p[i * wp + j - 1]; // Upper - no flux
-                    }
-                    else if (i == 0)
-                    {
-                        if (j*dy < 2.0)
-                        {
-                            p[i * wp + j] = p[(i + 1) * wp + j]; // left wall - not the inlet - Final
-                        }
-                        else
-                        {
-                            p[i * wp + j] = p[(i + 1) * wp + j];
-                        }
-                    }
-                    else if (i == nx)
-                    {
-                        if (j*dy < 2.0)
-                        {
-                            p[i * wp + j] = p[(i - 1) * wp + j]; // right wall - not the outlet - Final
-                        }
-                        else
-                        {
-                            p[i * wp + j] = -p[(i - 1) * wp + j]; // pressure outlet - static pressure is zero - Final
-                        }
-                    }
-                } // end for j
-            } // end for i
-            //................................................................................................
-
+            // Apply boundary conditions
+            PressureBC<<< dim3( (ny+1)/BLOCK_SIZE + 1, (nx+1)/BLOCK_SIZE + 1, 1) , dim3(BLOCK_SIZE,BLOCK_SIZE,1)>>>(ptr_p, nx, ny, dy, wp); // if you get non-physical answers, check to see if "ptr_abs" is pointing to a version of p that has been updated by the PressureSolve kernel, or if PressureBC is being passed some other version of p.
+            
+            // Retrieve error from device
+            //cudaMemcpy(&error, error_d, sizeof(float), cudaDeviceToHost);
+            
+            float error = thrust::reduce(abs_d.begin(), abs_d.end(), (float) 0, thrust::plus<float>()); // check syntax here if errors
             error = pow(error, 0.5);
             iter = iter + 1;
-            if (iter > maxiter)
-            {
+            if (iter > maxiter){
                 break;
             }
-
+            
         } // end while eps
-
+        p = p_d;
+        //thrust::copy(p_d.begin(), p_d.end(), p.begin());
+        //cudaMemcpy(p, p_d, sizeof(float)*(nx+1)*(ny+1), cudaMemcpyDeviceToHost);
+        
         int step2_end = clock();
         stepTimingAccumulator["Step 2 - Solve for pressure until tolerance or max iterations"] += step2_end - step2_start;
-        //...............................................................................................
+
 
         //.................................................................................................
         // Step 3 - It can be parallelized 
