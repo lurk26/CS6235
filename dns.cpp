@@ -9,7 +9,7 @@
 #include <map>
 #include <stdint.h>
 
-#include "freeglut\include\GL\glut.h"
+#include "freeglut/include/GL/glut.h"
 
 #include "HSV_RGB.h"
 
