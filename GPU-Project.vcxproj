@@ -20,8 +20,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dns.cpp" />
+    <ClCompile Include="DNSCPU.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="DNSCPU.h" />
     <ClInclude Include="HSV_RGB.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

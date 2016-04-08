@@ -18,10 +18,16 @@
     <ClCompile Include="dns.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="DNSCPU.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="HSV_RGB.h">
       <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DNSCPU.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
