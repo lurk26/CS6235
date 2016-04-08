@@ -23,20 +23,20 @@ struct RenderData2D
     uint32_t m_width;
     std::vector<rgb> m_data;
 
-    void Init(std::vector<float>& i_data, uint32_t i_width)
+    void Init(std::vector<float>& i_data, uint32_t i_width, float maxvalue, float minvalue)
     {
         m_width = i_width;
-        float maxvalue = *std::max_element(i_data.begin(), i_data.end());
-        float minValue = *std::min_element(i_data.begin(), i_data.end());
-        m_data.reserve(i_data.size());
+        //float maxvalue = *std::max_element(i_data.begin(), i_data.end());
+        //float minValue = *std::min_element(i_data.begin(), i_data.end());
+        m_data.resize(i_data.size());
         for (int i = 0; i < i_data.size(); ++i)
         {
             hsv color;
-            color.h = (i_data[i] - minValue) / (maxvalue - minValue) * 360;
+            color.h = (i_data[i] - minvalue) / (maxvalue - minvalue) * 360;
             color.s = 0.7;
             color.v = 0.7;
             
-            m_data.push_back(hsv2rgb(color));
+            m_data[i] = (hsv2rgb(color));
         }
     }
 };
