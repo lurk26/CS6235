@@ -27,3 +27,13 @@
 
 # Temporary files
 *~
+
+# Visual Studio
+*.tlog
+*.pdb
+*.sdf
+*.opensdf
+*.ilk
+*.log
+*.idb
+.vs/*
