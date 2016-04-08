@@ -12,6 +12,7 @@
 #include "freeglut/include/GL/glut.h"
 
 #include "HSV_RGB.h"
+#include "DNSCPU.h"
 
 using namespace std;
 
@@ -45,40 +46,8 @@ RenderData2D s_drawData;
 
 void renderPrimitive()
 {
-    //glBegin(GL_QUADS); //Begin quadrilateral coordinates
-
-    //                   //Trapezoid
-    //glVertex3f(-0.7f, -1.5f, -0.0f);
-    //glVertex3f(0.7f, -1.5f, -0.0f);
-    //glVertex3f(0.4f, -0.5f, -0.0f);
-    //glVertex3f(-0.4f, -0.5f, -0.0f);
-
-    //glEnd(); //End quadrilateral coordinates
-
-    //glBegin(GL_TRIANGLES); //Begin triangle coordinates
-
-    //                       //Pentagon
-    //glVertex3f(0.5f, 0.5f, 0.0f);
-    //glVertex3f(1.5f, 0.5f, -0.0f);
-    //glVertex3f(0.5f, 1.0f, -0.0f);
-
-    //glVertex3f(0.5f, 1.0f, -0.0f);
-    //glVertex3f(1.5f, 0.5f, -0.0f);
-    //glVertex3f(1.5f, 1.0f, -0.0f);
-
-    //glVertex3f(0.5f, 1.0f, -0.0f);
-    //glVertex3f(1.5f, 1.0f, 0.0f);
-    //glVertex3f(1.0f, 1.5f, -0.0f);
-
-    ////Triangle
-    //glVertex3f(-0.5f, 0.5f, -0.0f);
-    //glVertex3f(-1.0f, 1.5f, -0.0f);
-    //glVertex3f(-1.5f, 0.5f, -0.0f);
-
-    //glEnd(); //End triangle coordinates
-       glColor3f(1, 0.4, 0.2);
-
-    //glPointSize(WINDOW_WIDTH/s_drawData.m_width);
+ //     glColor3f(1, 0.4, 0.2);
+   //glPointSize(WINDOW_WIDTH/s_drawData.m_width);
        int windowWidth = glutGet(GLUT_WINDOW_WIDTH);
        int windowHeight = glutGet(GLUT_WINDOW_HEIGHT);
 	   if (s_drawData.m_data.size() > 0)
@@ -97,8 +66,6 @@ void renderPrimitive()
 			   y = (2 * y / height) - 1;
 			   glVertex2d(x, y);
 		   }
-		   //glVertex2d(0.2, 0.3);
-
 		   glEnd();
 	   }
 
@@ -121,6 +88,12 @@ void display()
     glutSwapBuffers();
 }
 
+void idle()
+{
+	DNSCPU::RunSimulation();
+	s_drawData.Init(DNSCPU::getTemperature(), DNSCPU::getTemperatureWidth(), 100, 0);
+	glutPostRedisplay();
+}
 
 int main(int argc, char**argv)
 {
@@ -646,7 +619,10 @@ int main(int argc, char**argv)
         std::cout << it->first << "\t" << seconds << endl;
     }
 
-    s_drawData.Init(T, wT);
+
+	//glutIdleFunc(idle);
+	std::vector<float> toDraw = u;
+	s_drawData.Init(toDraw, wu, *std::max(toDraw.begin(), toDraw.end()), *std::min(toDraw.begin(), toDraw.end()));
     glutMainLoop();
     return 0;
 } // end main
