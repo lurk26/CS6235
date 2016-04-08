@@ -9,9 +9,128 @@
 #include <map>
 #include <stdint.h>
 
+#include "freeglut\include\GL\glut.h"
+
+#include "HSV_RGB.h"
+
 using namespace std;
-int main()
+
+const int WINDOW_WIDTH = 500;
+const int WINDOW_HEIGHT = 500;
+
+struct RenderData2D
 {
+    uint32_t m_width;
+    std::vector<rgb> m_data;
+
+    void Init(std::vector<float>& i_data, uint32_t i_width)
+    {
+        m_width = i_width;
+        float maxvalue = *std::max_element(i_data.begin(), i_data.end());
+        float minValue = *std::min_element(i_data.begin(), i_data.end());
+        m_data.reserve(i_data.size());
+        for (int i = 0; i < i_data.size(); ++i)
+        {
+            hsv color;
+            color.h = (i_data[i] - minValue) / (maxvalue - minValue) * 360;
+            color.s = 0.7;
+            color.v = 0.7;
+            
+            m_data.push_back(hsv2rgb(color));
+        }
+    }
+};
+
+RenderData2D s_drawData;
+
+void renderPrimitive()
+{
+    //glBegin(GL_QUADS); //Begin quadrilateral coordinates
+
+    //                   //Trapezoid
+    //glVertex3f(-0.7f, -1.5f, -0.0f);
+    //glVertex3f(0.7f, -1.5f, -0.0f);
+    //glVertex3f(0.4f, -0.5f, -0.0f);
+    //glVertex3f(-0.4f, -0.5f, -0.0f);
+
+    //glEnd(); //End quadrilateral coordinates
+
+    //glBegin(GL_TRIANGLES); //Begin triangle coordinates
+
+    //                       //Pentagon
+    //glVertex3f(0.5f, 0.5f, 0.0f);
+    //glVertex3f(1.5f, 0.5f, -0.0f);
+    //glVertex3f(0.5f, 1.0f, -0.0f);
+
+    //glVertex3f(0.5f, 1.0f, -0.0f);
+    //glVertex3f(1.5f, 0.5f, -0.0f);
+    //glVertex3f(1.5f, 1.0f, -0.0f);
+
+    //glVertex3f(0.5f, 1.0f, -0.0f);
+    //glVertex3f(1.5f, 1.0f, 0.0f);
+    //glVertex3f(1.0f, 1.5f, -0.0f);
+
+    ////Triangle
+    //glVertex3f(-0.5f, 0.5f, -0.0f);
+    //glVertex3f(-1.0f, 1.5f, -0.0f);
+    //glVertex3f(-1.5f, 0.5f, -0.0f);
+
+    //glEnd(); //End triangle coordinates
+       glColor3f(1, 0.4, 0.2);
+
+    //glPointSize(WINDOW_WIDTH/s_drawData.m_width);
+       int windowWidth = glutGet(GLUT_WINDOW_WIDTH);
+       int windowHeight = glutGet(GLUT_WINDOW_HEIGHT);
+
+    glPointSize(windowWidth /s_drawData.m_width);
+    glBegin(GL_POINTS);
+    int height = s_drawData.m_data.size() / s_drawData.m_width;
+    for (int i = 0; i < s_drawData.m_data.size(); ++i)
+    {
+        float x = i / s_drawData.m_width;
+        float y = i - x*s_drawData.m_width;
+        rgb color = s_drawData.m_data[i];
+        glColor3f(color.r, color.g, color.b);
+        
+        x = (2 * x / s_drawData.m_width) - 1;
+        y = (2 * y / height) - 1;
+        glVertex2d(x, y);
+    }
+    //glVertex2d(0.2, 0.3);
+    glEnd();
+
+}
+
+void display()
+{
+    glClearColor(0.3f,0.3f,0.3f,0.3f);
+    glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
+
+    glMatrixMode( GL_PROJECTION );
+    glLoadIdentity();
+    glOrtho( -2, 2, -2, 2, -1, 1 );
+
+    glPushMatrix();
+    glTranslatef(0.0f,0.0f,-0.5f);
+    renderPrimitive();
+    glPopMatrix();
+
+    glutSwapBuffers();
+}
+
+
+int main(int argc, char**argv)
+{
+
+    glutInit(&argc, argv);
+    glutInitDisplayMode(GLUT_SINGLE | GLUT_RGB);
+    glutInitWindowSize(500, 500);
+    glutInitWindowPosition(100, 100);
+    glutCreateWindow("points and lines");
+    //init2D(0.0, 0.0, 0.0);
+    glutDisplayFunc(display);
+    
+
     // output format
     float start_clock = clock();
     ofstream f("result_cpu.txt"); // Solution Results
@@ -27,15 +146,15 @@ int main()
     // Input parameters 
     float Re, Pr, Fr, T_L, T_0, T_amb, ni, nj, dx, dy, t, ny, nx, eps, beta, iter, maxiter, tf, st, counter, column, u_wind, T_R, Lx, Ly;
     Lx = 4.0; Ly = 5.0; // Domain dimensions
-    ni = 2.0; // Number of nodes per unit length in x direction
-    nj = 2.0; // Number of nodes per unit length in y direction
+    ni = 10.0; // Number of nodes per unit length in x direction
+    nj = 10.0; // Number of nodes per unit length in y direction
     nx = Lx * ni; ny = Ly * nj; // Number of Nodes in each direction
     u_wind = 1; // Reference velocity
     st = 0.00005; // Total variance criteria
     eps = 0.001; // Pressure convergence criteria
     tf = 100.0; // Final time step
     Pr = 0.5*(0.709 + 0.711); // Prandtl number
-    Re = 30.0; Fr = 0.3; // Non-dimensional numbers for inflow conditions
+    Re = 300.0; Fr = 0.3; // Non-dimensional numbers for inflow conditions
     dx = Lx / (nx - 1); dy = Ly / (ny - 1); // dx and dy
     beta = 1.4; // Successive over relaxation factor (SOR)
     t = 0; // Initial time step
@@ -524,5 +643,7 @@ int main()
         std::cout << it->first << "\t" << seconds << endl;
     }
 
+    s_drawData.Init(T, wT);
+    glutMainLoop();
     return 0;
 } // end main
