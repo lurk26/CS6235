@@ -81,23 +81,26 @@ void renderPrimitive()
     //glPointSize(WINDOW_WIDTH/s_drawData.m_width);
        int windowWidth = glutGet(GLUT_WINDOW_WIDTH);
        int windowHeight = glutGet(GLUT_WINDOW_HEIGHT);
+	   if (s_drawData.m_data.size() > 0)
+	   {
+		   glPointSize(windowWidth / s_drawData.m_width);
+		   glBegin(GL_POINTS);
+		   int height = s_drawData.m_data.size() / s_drawData.m_width;
+		   for (int i = 0; i < s_drawData.m_data.size(); ++i)
+		   {
+			   float x = i / s_drawData.m_width;
+			   float y = i - x*s_drawData.m_width;
+			   rgb color = s_drawData.m_data[i];
+			   glColor3f(color.r, color.g, color.b);
 
-    glPointSize(windowWidth /s_drawData.m_width);
-    glBegin(GL_POINTS);
-    int height = s_drawData.m_data.size() / s_drawData.m_width;
-    for (int i = 0; i < s_drawData.m_data.size(); ++i)
-    {
-        float x = i / s_drawData.m_width;
-        float y = i - x*s_drawData.m_width;
-        rgb color = s_drawData.m_data[i];
-        glColor3f(color.r, color.g, color.b);
-        
-        x = (2 * x / s_drawData.m_width) - 1;
-        y = (2 * y / height) - 1;
-        glVertex2d(x, y);
-    }
-    //glVertex2d(0.2, 0.3);
-    glEnd();
+			   x = (2 * x / s_drawData.m_width) - 1;
+			   y = (2 * y / height) - 1;
+			   glVertex2d(x, y);
+		   }
+		   //glVertex2d(0.2, 0.3);
+
+		   glEnd();
+	   }
 
 }
 
