@@ -33,10 +33,10 @@ private:
 	static void Init();
 
 	// Call this to move ahead in time. dt is defined in the .cpp file
-	static void DNSCPU::Step();
+	static void Step();
 	
 	// Call this to Finish 
-	static void DNSCPU::Finish();
+	static void Finish();
 
 
 
