@@ -44,49 +44,7 @@ struct RenderData2D
 
 RenderData2D s_drawData;
 
-void renderPrimitive()
-{
- //     glColor3f(1, 0.4, 0.2);
-   //glPointSize(WINDOW_WIDTH/s_drawData.m_width);
-       int windowWidth = glutGet(GLUT_WINDOW_WIDTH);
-       int windowHeight = glutGet(GLUT_WINDOW_HEIGHT);
-	   if (s_drawData.m_data.size() > 0)
-	   {
-		   glPointSize(windowWidth / s_drawData.m_width);
-		   glBegin(GL_POINTS);
-		   int height = s_drawData.m_data.size() / s_drawData.m_width;
-		   for (int i = 0; i < s_drawData.m_data.size(); ++i)
-		   {
-			   float x = i / s_drawData.m_width;
-			   float y = i - x*s_drawData.m_width;
-			   rgb color = s_drawData.m_data[i];
-			   glColor3f(color.r, color.g, color.b);
 
-			   x = (2 * x / s_drawData.m_width) - 1;
-			   y = (2 * y / height) - 1;
-			   glVertex2d(x, y);
-		   }
-		   glEnd();
-	   }
-
-}
-
-void display()
-{
-    glClearColor(0.3f,0.3f,0.3f,0.3f);
-    glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
-
-    glMatrixMode( GL_PROJECTION );
-    glLoadIdentity();
-    glOrtho( -2, 2, -2, 2, -1, 1 );
-
-    glPushMatrix();
-    glTranslatef(0.0f,0.0f,-0.5f);
-    renderPrimitive();
-    glPopMatrix();
-
-    glutSwapBuffers();
-}
 
 void idle()
 {
@@ -94,9 +52,42 @@ void idle()
 	std::vector<float>& data = DNSCPU::getU();
 	float maxvalue = *std::max_element(data.begin(), data.end());
 	float minvalue = *std::min_element(data.begin(), data.end());
+
+    maxvalue = 3.0f;
+    minvalue = -3.0f;
+
 	s_drawData.Init(data, DNSCPU::getUWidth(), maxvalue, minvalue);
 	glutPostRedisplay();
 }
+
+void RenderPrimitive();
+void display();
+
+// The original SOR solver lives in DoStuff();
+// At the end of DoStuff we pass in the data to be drawn on screen
+void DoStuff();
+
+int main(int argc, char**argv)
+{
+    glutInit(&argc, argv);
+    glutInitDisplayMode(GLUT_SINGLE | GLUT_RGB);
+    glutInitWindowSize(500, 500);
+    glutInitWindowPosition(100, 100);
+    glutCreateWindow("points and lines");
+    glutDisplayFunc(display);
+    
+    
+    // Uncomment this to run the original solver. 
+    //DoStuff();
+    
+    // The idle func (defined in thsi while) will run the simulation (currently its jacobi)
+    glutIdleFunc(idle);
+	
+    glutMainLoop();
+    return 0;
+} // end main
+
+
 
 void DoStuff()
 {
@@ -613,23 +604,50 @@ void DoStuff()
     }
 
     std::vector<float> toDraw(u);
-	s_drawData.Init(toDraw, wu, *(std::max_element(toDraw.begin(), toDraw.end())), *(std::min_element(toDraw.begin(), toDraw.end())));
-    
+    s_drawData.Init(toDraw, wu, *(std::max_element(toDraw.begin(), toDraw.end())), *(std::min_element(toDraw.begin(), toDraw.end())));
+
 }
-int main(int argc, char**argv)
+
+void renderPrimitive()
 {
+    //     glColor3f(1, 0.4, 0.2);
+    //glPointSize(WINDOW_WIDTH/s_drawData.m_width);
+    int windowWidth = glutGet(GLUT_WINDOW_WIDTH);
+    int windowHeight = glutGet(GLUT_WINDOW_HEIGHT);
+    if (s_drawData.m_data.size() > 0)
+    {
+        glPointSize(windowWidth / s_drawData.m_width);
+        glBegin(GL_POINTS);
+        int height = s_drawData.m_data.size() / s_drawData.m_width;
+        for (int i = 0; i < s_drawData.m_data.size(); ++i)
+        {
+            float x = i / s_drawData.m_width;
+            float y = i - x*s_drawData.m_width;
+            rgb color = s_drawData.m_data[i];
+            glColor3f(color.r, color.g, color.b);
 
-    DoStuff();
+            x = (2 * x / s_drawData.m_width) - 1;
+            y = (2 * y / height) - 1;
+            glVertex2d(x, y);
+        }
+        glEnd();
+    }
 
-    glutInit(&argc, argv);
-    glutInitDisplayMode(GLUT_SINGLE | GLUT_RGB);
-    glutInitWindowSize(500, 500);
-    glutInitWindowPosition(100, 100);
-    glutCreateWindow("points and lines");
-    //init2D(0.0, 0.0, 0.0);
-    glutDisplayFunc(display);
-    
-	//glutIdleFunc(idle);
-	glutMainLoop();
-    return 0;
-} // end main
+}
+
+void display()
+{
+    glClearColor(0.3f, 0.3f, 0.3f, 0.3f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(-2, 2, -2, 2, -1, 1);
+
+    glPushMatrix();
+    glTranslatef(0.0f, 0.0f, -0.5f);
+    renderPrimitive();
+    glPopMatrix();
+
+    glutSwapBuffers();
+}
