@@ -24,6 +24,9 @@ public:
 	static std::vector<float>& getTemperature();
 	static float getTemperatureWidth();
 
+    static std::vector<float>& getU();
+    static float getUWidth();
+
 private:
 
 	// Call this to initialize shit

@@ -124,6 +124,14 @@ float DNSCPU::getTemperatureWidth()
 	return wT;
 }
 
+std::vector<float>& DNSCPU::getU()
+{
+    return u;
+}
+float DNSCPU::getUWidth()
+{
+    return wu;
+}
 
 // Call this to initialize shit
 void DNSCPU::Init()
