@@ -32,7 +32,7 @@ int j = blockIdx.y * blockDim.y + threadIdx.y;
 
 
 
-__global__ void PressureSolve(float * p_d, float * abs_d, const float * us_d, const float * vs_d, float error, int p_xlength, int p_ylength, int wp, int wu, int wv, float beta, float dx, float dy, float dt)
+__global__ void PressureSolve(float * p_d, const float * p_old, float * abs_d, const float * us_d, const float * vs_d, int p_xlength, int p_ylength, int wp, int wu, int wv, float dx, float dy, float dt)
 {
     
     int i = threadIdx.x + blockDim.x*blockIdx.x;
@@ -41,63 +41,80 @@ __global__ void PressureSolve(float * p_d, float * abs_d, const float * us_d, co
     
     if (i > 0 && i < p_xlength && j > 0 && j < p_ylength)
     {
-        float pold = p_d[i * wp + j];    // Store previous pressures in pold
-        //__syncthreads();
+        __syncthreads();
         
-        p_d[i * wp + j] = beta*pow(dx, 2.0)*pow(dy, 2.0) / (-2.0*(pow(dx, 2.0) + pow(dy, 2.0)))*(-1.0 / pow(dx, 2.0)*(p_d[(i + 1) * wp + j] + p_d[(i - 1) * wp + j] + p_d[i * wp + j + 1] + p_d[i * wp + j - 1]) + 1.0 / dt*(1.0 / dx*(us_d[i * wu + j] - us_d[(i - 1) * wu + j]) + 1.0 / dy*(vs_d[i * wv + j] - vs_d[i * wv + j - 1]))) + (1.0 - beta)*p_d[i * wp + j];
+        p_d[i * wp + j] = pow(dx, 2.0)*pow(dy, 2.0) / (-2.0*(pow(dx, 2.0) + pow(dy, 2.0)))*(-1.0 / pow(dx, 2.0)*(p_old[(i + 1) * wp + j] + p_old[(i - 1) * wp + j] + p_old[i * wp + j + 1] + p_old[i * wp + j - 1]) + 1.0 / dt*(1.0 / dx*(us_d[i * wu + j] - us_d[(i - 1) * wu + j]) + 1.0 / dy*(vs_d[i * wv + j] - vs_d[i * wv + j - 1])));
+        __syncthreads();
         
-        abs_d[i * wp + j] = pow((p_d[i * wp + j] - pold), 2.0);
-        
-        //__syncthreads
-        
-        
-        
+    abs_d[i * wp + j] = p_d[i * wp + j] - p_old[i * wp + j];
+
+__syncthreads();
+
+    abs_d[i * wp + j] = abs_d[i * wp + j] * abs_d[i * wp + j];
+__syncthreads();
     } // end if
+
+
 } // end global
 
 
-__global__ void PressureBC(float * p_d, int nx, int ny, int dy, int wp)
+__global__ void PressureBC(float * p_d, float * p_ref, int nx, int ny, float dy, int wp)
 {
     
     int i = threadIdx.x + blockDim.x*blockIdx.x;
     int j = threadIdx.y + blockDim.y*blockIdx.y;
     
-    if (i > 0 && i < nx + 1 && j == 0){
-        p_d[i * wp + j] = p_d[i * wp + j + 1]; // bottom wall - Final
+    if (i >= 0 && i < nx + 1 && j == 0){
+        p_d[i * wp + j] = p_ref[i * wp + j + 1]; // bottom wall - Final
     }
-    if (i > 0 && i < nx + 1 && j == ny){
-        p_d[i * wp + j] = p_d[i * wp + j - 1]; // Upper - no flux
+__syncthreads();
+    if (i >= 0 && i < nx + 1 && j == ny){
+        p_d[i * wp + j] = p_ref[i * wp + j - 1]; // Upper - no flux
     }
-    if (j > 0 && j < ny + 1 && i == 0){
-        p_d[i * wp + j] = p_d[(i + 1) * wp + j]; // left wall - not the inlet - Final
+__syncthreads();
+    if (j >= 0 && j < ny + 1 && i == 0){
+        p_d[i * wp + j] = p_ref[(i + 1) * wp + j]; // left wall - not the inlet - Final
     }
-    if (j > 0 && j < ny + 1 && i == nx && j*dy < 2.0){
-        p_d[i * wp + j] = p_d[(i - 1) * wp + j]; // right wall - not the outlet - Final
-    }
-    if (j > 0 && j < ny + 1 && i == nx && j*dy >= 2.0){
-        p_d[i * wp + j] = -p_d[(i - 1) * wp + j]; // pressure outlet - static pressure is zero - Final
-    }
+__syncthreads();
+    if (j >= 0 && j < ny + 1 && i == nx && j*dy < 2.0){
+        p_d[i * wp + j] = p_ref[(i - 1) * wp + j]; // right wall - not the outlet - Final
+    
+    // printf("POSITIVE ");
+}
+__syncthreads();
+    if (j >= 0 && j < ny + 1 && i == nx && j*dy >= 2.0){
+        p_d[i * wp + j] = -p_ref[(i - 1) * wp + j]; // pressure outlet - static pressure is zero - Final
+// printf("NEGATIVE ");    
+
+}
+__syncthreads();
     
 }
-
 
 
 int main()
 {
     // output format
     float start_clock = clock();
-    ofstream f("result_gpu.txt"); // Solution Results
+    ofstream f("result_gpu_BC_sum.txt"); // Solution Results
     f.setf(ios::fixed | ios::showpoint);
     f << setprecision(5);
 
-    ofstream g("convergence_gpu.txt"); // Convergence history
+    ofstream g("convergence_gpu_BC_sum.txt"); // Convergence history
     g.setf(ios::fixed | ios::showpoint);
     g << setprecision(5);
     cout.setf(ios::fixed | ios::showpoint);
     cout << setprecision(5);
 
+ofstream file_p_before("p_before_gpu_BC.txt");
+file_p_before.setf(ios::fixed | ios::showpoint);
+file_p_before << setprecision(3); 
+ofstream file_p_after("p_after_gpu_BC.txt");
+file_p_after.setf(ios::fixed | ios::showpoint);
+file_p_after << setprecision(3);
+
     // Input parameters 
-    float Re, Pr, Fr, T_L, T_0, T_amb, dx, dy, t, eps, beta, iter, maxiter, tf, st, counter, column, u_wind, T_R, Lx, Ly;
+    float Re, Pr, Fr, T_L, T_0, T_amb, dx, dy, t, eps, /* beta, */ iter, maxiter, tf, st, counter, column, u_wind, T_R, Lx, Ly;
     Lx = 4.0; Ly = 5.0; // Domain dimensions
     int ni = 2.0; // Number of nodes per unit length in x direction
     int nj = 2.0; // Number of nodes per unit length in y direction
@@ -105,18 +122,18 @@ int main()
     u_wind = 1; // Reference velocity
     st = 0.00005; // Total variance criteria
     eps = 0.001; // Pressure convergence criteria
-    tf = 1.0; // Final time step
+    tf = 100; // Final time step
     Pr = 0.5*(0.709 + 0.711); // Prandtl number
     Re = 30.0; Fr = 0.3; // Non-dimensional numbers for inflow conditions
     dx = Lx / (nx - 1); dy = Ly / (ny - 1); // dx and dy
-    beta = 1.4; // Successive over relaxation factor (SOR)
+    //beta = 1; // Successive over relaxation factor (SOR)
     t = 0; // Initial time step
     T_L = 100.0; // Left wall temperature (C)
     T_R = 50.0; // Right wall temperature (C)
     T_amb = 25.0; // Ambient air temperature (C)
     T_0 = 50.0; // Initial air temperature
     T_L = T_L + 273.15; T_0 = T_0 + 273.15; T_amb = T_amb + 273.15; T_R = T_R + 273.15;// Unit conversion to (K)
-    maxiter = 100; // Maximum iteration at each time step
+    maxiter = 500; // Maximum iteration at each time step
     counter = 0; // initial row for output monitoring
     column = 1; // Column number for output display
 
@@ -149,12 +166,15 @@ int main()
     thrust::host_vector<float> uc(nx * ny);
     thrust::host_vector<float> pc(nx * ny);
     thrust::host_vector<float> Tc(nx*ny);
+   // thrust::host_vector<float> abs_h((nx+1) * (ny + 1));
     int wc = ny;
 
 
 	thrust::device_vector<float> us_d(nx*(ny + 1));
 	thrust::device_vector<float> vs_d((nx + 1) * ny);
         thrust::device_vector<float> p_d((nx + 1) * (ny + 1));
+	thrust::device_vector<float> p_old((nx + 1) * (ny + 1));
+	thrust::device_vector<float> p_ref((nx + 1) * (ny + 1));
         thrust::device_vector<float> abs_d((nx + 1) * (ny + 1));
 
     // Time step size stability criterion
@@ -365,52 +385,76 @@ int main()
         //...............................................................................................
         // Step 2 - Parallel GPU version
         // Poisson equation for pressure
-       
-        
-	us_d = us;
-	vs_d = vs;
-        p_d = p;
- //       abs_d = abs;
         
         int step2_start = clock();
         
         // Cuda set up
         int p_xlength = nx;
         int p_ylength = ny;
-        
-        /*cudaMalloc((void**) &us_d, (nx)*(ny+1)*sizeof(float));
-        cudaMalloc((void**) &vs_d, (nx+1)*(ny)*sizeof(float));
-        cudaMalloc((void**) &p_d, (nx+1)*(ny+1)*sizeof(float));
-        cudaMalloc((void**) &abs_d, (nx+1)*(ny+1)*sizeof(float));*/
-        
-        /*cudaMemcpy(us_d, us, sizeof(float)*(nx)*(ny+1), cudaMemcpyHostToDevice);
-        cudaMemcpy(vs_d, vs, sizeof(float)*(nx+1)*(ny), cudaMemcpyHostToDevice);
-        cudaMemcpy(p_d, p, sizeof(float)*(nx+1)*(ny+1), cudaMemcpyHostToDevice);
-        cudaMemcpy(abs_d, abs, sizeof(float)*(nx+1)*(ny+1), cudaMemcpyHostToDevice);*/
 
 	float *ptr_us = thrust::raw_pointer_cast(&us_d[0]);
 	float *ptr_vs = thrust::raw_pointer_cast(&vs_d[0]);
 	float *ptr_p = thrust::raw_pointer_cast(&p_d[0]);
+	float *ptr_p_old = thrust::raw_pointer_cast(&p_old[0]);
 	float *ptr_abs = thrust::raw_pointer_cast(&abs_d[0]);
-        
-        float error = 1; iter = 0;
-        
-        
-        // Begin SOR loop
+        float *ptr_p_ref = thrust::raw_pointer_cast(&p_ref[0]);
+
+        float error = 1.0; iter = 0;
+        float diffp = 0;
+        us_d = us;
+	vs_d = vs;
+
+        // Begin Jacobi loop
         while (error > eps){
-            
+	//error = 0.0;
+      //  p_d = p;
+	p_old = p_d;
+
             // SOR pressure solver
-            PressureSolve<<< dim3( (ny+1)/BLOCK_SIZE + 1, (nx+1)/BLOCK_SIZE + 1, 1) , dim3(BLOCK_SIZE,BLOCK_SIZE,1)>>>(ptr_p, ptr_abs, ptr_us, ptr_vs, error, p_xlength, p_ylength, wp, wu, wv, beta, dx, dy, dt);
-            
+            PressureSolve<<< dim3( (ny+1)/BLOCK_SIZE + 1, (nx+1)/BLOCK_SIZE + 1, 1) , dim3(BLOCK_SIZE,BLOCK_SIZE,1)>>>(ptr_p, ptr_p_old, ptr_abs, ptr_us, ptr_vs, p_xlength, p_ylength, wp, wu, wv, dx, dy, dt);
+           cudaDeviceSynchronize();
+//	p = p_d;
+	p_ref = p_d;
 
+error = thrust::reduce(abs_d.begin(), abs_d.end());
 
+   /*  	    for (int i = 1; i < nx; i++)
+            {
+                for (int j = 1; j < ny; j++)
+                {
+                    diffp = pow((p[i * wp + j] - p_old[i * wp + j]), 2.0);
+                    error = error + diffp;
+                } // end for j
+            } // end for i
+*/
+
+/* for(int i = 0; i < nx + 1; ++i)
+{
+	for(int j = 0; j < ny + 1; ++j)
+    {
+        file_p_before << p[i * wp + j] << "\t";
+    }
+    file_p_before << endl;
+}
+*/
             // Apply boundary conditions
-            PressureBC<<< dim3( (ny+1)/BLOCK_SIZE + 1, (nx+1)/BLOCK_SIZE + 1, 1) , dim3(BLOCK_SIZE,BLOCK_SIZE,1)>>>(ptr_p, nx, ny, dy, wp); // if you get non-physical answers, check to see if "ptr_abs" is pointing to a version of p that has been updated by the PressureSolve kernel, or if PressureBC is being passed some other version of p.
-            
-            // Retrieve error from device
-            //cudaMemcpy(&error, error_d, sizeof(float), cudaDeviceToHost);
-            
-            float error = thrust::reduce(abs_d.begin(), abs_d.end(), (float) 0, thrust::plus<float>()); // check syntax here if errors
+
+	PressureBC<<< dim3( (ny+1)/BLOCK_SIZE + 1, (nx+1)/BLOCK_SIZE + 1, 1) , dim3(BLOCK_SIZE,BLOCK_SIZE,1)>>>(ptr_p, ptr_p_ref, nx, ny, dy, wp);
+
+cudaDeviceSynchronize();
+// p = p_d;
+//file_p_after << p.size() << endl;
+
+
+/* for(int i = 0; i < nx + 1; ++i)
+{
+	for(int j = 0; j < ny + 1; ++j)
+    {
+        file_p_after << p[i * wp + j] << "\t";
+    }
+    file_p_after << endl;
+} */
+  
             error = pow(error, 0.5);
             iter = iter + 1;
             if (iter > maxiter){
@@ -418,10 +462,19 @@ int main()
             }
             
         } // end while eps
-        p = p_d;
-        //thrust::copy(p_d.begin(), p_d.end(), p.begin());
-        //cudaMemcpy(p, p_d, sizeof(float)*(nx+1)*(ny+1), cudaMemcpyDeviceToHost);
-        
+
+p = p_d;
+/*          
+break;
+            error = pow(error, 0.5);
+        iter = iter + 1;            
+        if (iter == maxiter){
+                break;
+            }
+            
+            
+        } // end while eps
+  */
         int step2_end = clock();
         stepTimingAccumulator["Step 2 - Solve for pressure until tolerance or max iterations"] += step2_end - step2_start;
 
@@ -467,15 +520,6 @@ int main()
 	thrust::device_vector<float> d_u = u;
 	thrust::device_vector<float> d_v = v;
 	
-/*        for (int i = 1; i < nx; i++)
-        {
-            for (int j = 1; j < ny; j++)
-            {
-                Told[i * wT + j] = T[i * wT + j];
-                T[i * wT + j] = T[i * wT + j] + dt*(-0.5*(u[i * wu + j] + u[(i - 1) * wu + j])*(1.0 / (2.0*dx)*(T[(i + 1) * wT + j] - T[(i - 1) * wT + j])) - 0.5*(v[i * wv + j] + v[i * wv + j - 1])*(1.0 / (2.0*dy)*(T[i * wT + j + 1] - T[i * wT + j - 1])) + 1 / (Re*Pr)*(1 / pow(dx, 2.0)*(T[(i + 1) * wT + j] - 2.0*T[i * wT + j] + T[(i - 1) * wT + j]) + 1 / pow(dy, 2.0)*(T[i * wT + j + 1] - 2 * T[i * wT + j] + T[i * wT + j - 1])));
-            } // end for j
-        } // end for i
-*/	
 	int gridsize_x = nx/BLOCK_SIZE + 1;
 	int gridsize_y = ny/BLOCK_SIZE + 1;
 
@@ -487,7 +531,6 @@ int main()
 	float *ptr_T = thrust::raw_pointer_cast(&d_T[0]);
 	float *ptr_Told = thrust::raw_pointer_cast(&d_Told[0]);
 
-//(int nx, int ny, int wu, int wv, int wT, float dx, float dy, float dt, float Re, float Pr, float *d_u, float *d_v, float *d_Told, float *d_T)
 	Temperature_solver<<<dimgrid, dimblock>>>(nx, ny, wu, wv, wT, dx, dy, dt, Re, Pr, ptr_u, ptr_v, ptr_Told, ptr_T);
 
 	thrust::copy(d_Told.begin(), d_Told.end(), Told.begin());
