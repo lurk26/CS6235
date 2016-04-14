@@ -29,5 +29,13 @@
     <ClInclude Include="DNSCPU.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="DNSGPU.cuh">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="DNSGPU.cu">
+      <Filter>Source Files</Filter>
+    </CudaCompile>
   </ItemGroup>
 </Project>

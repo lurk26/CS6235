@@ -1,4 +1,4 @@
-#include "DNSCPU.h"
+#include "DNSGPU.cuh"
 
 #include <iostream>
 #include <fstream>
@@ -10,6 +10,13 @@
 #include <string>
 #include <map>
 #include <stdint.h>
+#include <thrust/host_vector.h>
+#include <thrust/device_vector.h>
+#include <thrust/reduce.h>
+
+#include <cuda_runtime_api.h>
+#include <device_launch_parameters.h>
+#include <cuda.h>
 
 
 // Define variables in global space (bad practice but we'll go with this for now)
@@ -18,22 +25,22 @@ namespace
 {
 	using namespace std;
 
-	DNSCPU::SIMSTATES s_nextState = DNSCPU::SIMSTATES::INIT;
+	DNSGPU::SIMSTATES s_nextState = DNSGPU::SIMSTATES::INIT;
 
 	// output format
 	float start_clock = clock();
 
-	ofstream f("result_cpu.txt"); // Solution Results
+	ofstream f("result_gpu.txt"); // Solution Results
 	
-	ofstream g("convergence_cpu.txt"); // Convergence history
+	ofstream g("convergence_gpu.txt"); // Convergence history
 
 
 	// Input parameters 
 	//float Re, Pr, Fr, T_L, T_0, T_amb, ni, nj, dx, dy, t, ny, nx, eps, /*beta,*/ iter, maxiter, tf, st, counter, column, u_wind, T_R, Lx, Ly;
 	
 	float Lx = 4.0, Ly = 5.0; // Domain dimensions
-	int ni = 10; // Number of nodes per unit length in x direction
-	int nj = 10; // Number of nodes per unit length in y direction
+	int ni = 2; // Number of nodes per unit length in x direction
+	int nj = 2; // Number of nodes per unit length in y direction
 	int nx = Lx * ni; 
 	int ny = Ly * nj; // Number of Nodes in each direction
 	float u_wind = 1; // Reference velocity
@@ -57,34 +64,46 @@ namespace
 				// Records number of clicks a step takes
 	std::map<string, uint32_t> stepTimingAccumulator;
 
-	// Vectors
+	// Output vector (goes out to visualize data)
+	std::vector<float> vizOutput;
 
-	vector<float> u(nx * (ny + 1), 0);
-	vector<float> us(nx*(ny + 1), 0);
-	vector<float> uold(nx * (ny + 1), 0);
+	// Host Vectors
+
+	thrust::host_vector<float> u(nx * (ny + 1));
+	thrust::host_vector<float> us(nx*(ny + 1));
+	thrust::host_vector<float> uold(nx * (ny + 1));
 	int wu = ny + 1;
 
-	vector<float> v((nx + 1) * ny, 0);
-	vector<float> vs((nx + 1) * ny, 0);
-	vector<float> vold((nx + 1) * ny, 0);
+	thrust::host_vector<float> v((nx + 1) * ny);
+	thrust::host_vector<float> vs((nx + 1) * ny);
+	thrust::host_vector<float> vold((nx + 1) * ny);
 	int wv = ny;
 
-	vector<float> p((nx + 1) * (ny + 1), 0);
-	vector<float> pold((nx + 1) * (ny + 1), 0);
+	thrust::host_vector<float> p((nx + 1) * (ny + 1));
 	int wp = ny + 1;
 
-	vector<float> T;     // Initializing the flow variable (Temperature)  
-														   // Boundary conditions for T (Initialization)
+
+
+	thrust::host_vector<float> T;
 	int wT = ny + 1;
 
 	// These are initialized in the Init() function
-	vector<float> Told;
-	vector<float> om;
-	vector<float> vc;
-	vector<float> uc;
-	vector<float> pc;
-	vector<float> Tc;
+	thrust::host_vector<float> Told;
+	thrust::host_vector<float> om;
+	thrust::host_vector<float> vc;
+	thrust::host_vector<float> uc;
+	thrust::host_vector<float> pc;
+	thrust::host_vector<float> Tc;
 	int wc = ny;
+
+	thrust::device_vector<float> us_d(nx*(ny + 1));
+	thrust::device_vector<float> vs_d((nx + 1) * ny);
+	thrust::device_vector<float> p_d((nx + 1) * (ny + 1));
+	thrust::device_vector<float> p_old((nx + 1) * (ny + 1));
+	thrust::device_vector<float> p_ref((nx + 1) * (ny + 1));
+	thrust::device_vector<float> abs_d((nx + 1) * (ny + 1));
+
+#define BLOCK_SIZE 32 // Number of threads in x and y direction - Maximum Number of threads per block = 32 * 32 = 1024
 
 	// Time step size stability criterion
 
@@ -94,7 +113,7 @@ namespace
 }
 
 
-void DNSCPU::RunSimulation()
+void DNSGPU::RunSimulation()
 {
 	switch (s_nextState)
 	{
@@ -107,35 +126,8 @@ void DNSCPU::RunSimulation()
 
 }
 
-std::vector<float>& DNSCPU::getPressure()
-{
-	return p;
-}
-float DNSCPU::getPressureWidth()
-{
-	return wp;
-}
-
-std::vector<float>& DNSCPU::getTemperature()
-{
-	return T;
-}
-float DNSCPU::getTemperatureWidth()
-{
-	return wT;
-}
-
-std::vector<float>& DNSCPU::getU()
-{
-    return u;
-}
-float DNSCPU::getUWidth()
-{
-    return wu;
-}
-
 // Call this to initialize shit
-void DNSCPU::Init()
+void DNSGPU::Init()
 {
 	f.setf(ios::fixed | ios::showpoint);
 	f << setprecision(5);
@@ -173,8 +165,84 @@ void DNSCPU::Init()
 	s_nextState = STEP;
 }
 
-void DNSCPU::Step()
+__global__ void Temperature_solver(int nx, int ny, int wu, int wv, int wT, float dx, float dy, float dt, float Re, float Pr, float *u, float *v, float *Told, float *T)
 {
+
+	int i = blockIdx.x * blockDim.x + threadIdx.x;
+	int j = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (i > 0 && i < nx && j > 0 && j < ny) {
+
+		Told[i * wT + j] = T[i * wT + j];
+		T[i * wT + j] = T[i * wT + j] + dt*(-0.5*(u[i * wu + j] + u[(i - 1) * wu + j])*(1.0 / (2.0*dx)*(T[(i + 1) * wT + j] - T[(i - 1) * wT + j])) - 0.5*(v[i * wv + j] + v[i * wv + j - 1])*(1.0 / (2.0*dy)*(T[i * wT + j + 1] - T[i * wT + j - 1])) + 1 / (Re*Pr)*(1 / pow(dx, 2.0f)*(T[(i + 1) * wT + j] - 2.0*T[i * wT + j] + T[(i - 1) * wT + j]) + 1 / pow(dy, 2.0f)*(T[i * wT + j + 1] - 2 * T[i * wT + j] + T[i * wT + j - 1])));
+	}
+	__syncthreads();
+}
+
+
+
+__global__ void PressureSolve(float * p_d, const float * p_old, float * abs_d, const float * us_d, const float * vs_d, int p_xlength, int p_ylength, int wp, int wu, int wv, float dx, float dy, float dt)
+{
+
+	int i = threadIdx.x + blockDim.x*blockIdx.x;
+	int j = threadIdx.y + blockDim.y*blockIdx.y;
+
+
+	if (i > 0 && i < p_xlength && j > 0 && j < p_ylength)
+	{
+		//        __syncthreads();
+
+		p_d[i * wp + j] = pow(dx, 2.0f)*pow(dy, 2.0f) / (-2.0*(pow(dx, 2.0f) + pow(dy, 2.0f)))*(-1.0 / pow(dx, 2.0f)*(p_old[(i + 1) * wp + j] + p_old[(i - 1) * wp + j] + p_old[i * wp + j + 1] + p_old[i * wp + j - 1]) + 1.0 / dt*(1.0 / dx*(us_d[i * wu + j] - us_d[(i - 1) * wu + j]) + 1.0 / dy*(vs_d[i * wv + j] - vs_d[i * wv + j - 1])));
+		__syncthreads();
+
+		abs_d[i * wp + j] = p_d[i * wp + j] - p_old[i * wp + j];
+
+		__syncthreads();
+
+		abs_d[i * wp + j] = abs_d[i * wp + j] * abs_d[i * wp + j];
+		//__syncthreads();
+	} // end if
+
+
+} // end global
+
+
+__global__ void PressureBC(float * p_d, float * p_ref, int nx, int ny, float dy, int wp)
+{
+
+	int i = threadIdx.x + blockDim.x*blockIdx.x;
+	int j = threadIdx.y + blockDim.y*blockIdx.y;
+
+	if (i >= 0 && i < nx + 1 && j == 0) {
+		p_d[i * wp + j] = p_ref[i * wp + j + 1]; // bottom wall - Final
+	}
+	__syncthreads();
+	if (i >= 0 && i < nx + 1 && j == ny) {
+		p_d[i * wp + j] = p_ref[i * wp + j - 1]; // Upper - no flux
+	}
+	__syncthreads();
+	if (j >= 0 && j < ny + 1 && i == 0) {
+		p_d[i * wp + j] = p_ref[(i + 1) * wp + j]; // left wall - not the inlet - Final
+	}
+	__syncthreads();
+	if (j >= 0 && j < ny + 1 && i == nx && j*dy < 2.0) {
+		p_d[i * wp + j] = p_ref[(i - 1) * wp + j]; // right wall - not the outlet - Final
+
+												   // printf("POSITIVE ");
+	}
+	__syncthreads();
+	if (j >= 0 && j < ny + 1 && i == nx && j*dy >= 2.0) {
+		p_d[i * wp + j] = -p_ref[(i - 1) * wp + j]; // pressure outlet - static pressure is zero - Final
+													// printf("NEGATIVE ");    
+
+	}
+	//__syncthreads();
+
+}
+
+void DNSGPU::Step()
+{
+	cudaDeviceSynchronize();
 	// dt is defined statically 
 	if(t<tf)
 	{
@@ -343,86 +411,44 @@ void DNSCPU::Step()
 		// This is the most expensive part of the code
 		// Poisson equation for pressure
 		int step2_start = clock();
+		// Cuda set up
+		int p_xlength = nx;
+		int p_ylength = ny;
 
-		float error = 1; int iter = 0;
-		float diffp;
-		// Solve for pressure iteratively until it converges - Using Gauss Seidel SOR 
-		while (error > eps)
-		{
-			error = 0;
+		float *ptr_us = thrust::raw_pointer_cast(&us_d[0]);
+		float *ptr_vs = thrust::raw_pointer_cast(&vs_d[0]);
+		float *ptr_p = thrust::raw_pointer_cast(&p_d[0]);
+		float *ptr_p_old = thrust::raw_pointer_cast(&p_old[0]);
+		float *ptr_abs = thrust::raw_pointer_cast(&abs_d[0]);
+		float *ptr_p_ref = thrust::raw_pointer_cast(&p_ref[0]);
 
-			//............................................................................................
+		float error = 1.0; int iter = 0;
+		// float diffp = 0;
+		us_d = us;
+		vs_d = vs;
 
+		// Begin Jacobi loop
+		while (error > eps && iter < maxiter) {
+			p_old = p_d;
 
-			// Fill pold with p
+			// Jacobi pressure solver
+			PressureSolve <<< dim3((ny + 1) / BLOCK_SIZE + 1, (nx + 1) / BLOCK_SIZE + 1, 1), dim3(BLOCK_SIZE, BLOCK_SIZE, 1) >> >(ptr_p, ptr_p_old, ptr_abs, ptr_us, ptr_vs, p_xlength, p_ylength, wp, wu, wv, dx, dy, dt);
+			cudaDeviceSynchronize();
 
-			//	for (int i = 0; i < nx + 1; i++){
-			//		for (int j = 0; j < ny + 1; j++){
-			//pold[i * wp + j] = p [i * wp + j];
-			pold = p;
-			//		}
-			//	}
+			p_ref = p_d;
 
-			for (int i = 1; i < nx; i++)
-			{
-				for (int j = 1; j < ny; j++)
-				{
-					//pold = p[i * wp + j];
+			error = thrust::reduce(abs_d.begin(), abs_d.end());
 
-					p[i * wp + j] = /*beta**/pow(dx, 2.0)*pow(dy, 2.0) / (-2.0*(pow(dx, 2.0) + pow(dy, 2.0)))*(-1.0 / pow(dx, 2.0)*(pold[(i + 1) * wp + j] + pold[(i - 1) * wp + j] + pold[i * wp + j + 1] + pold[i * wp + j - 1]) + 1.0 / dt*(1.0 / dx*(us[i * wu + j] - us[(i - 1) * wu + j]) + 1.0 / dy*(vs[i * wv + j] - vs[i * wv + j - 1])))/* + (1.0 - beta)*pold[i * wp + j]*/;
-					diffp = pow((p[i * wp + j] - pold[i * wp + j]), 2.0);
-					error = error + diffp;
-				} // end for j
-			} // end for i
-			  //............................................................................................
-			  // boundary conditions for pressure
+			PressureBC <<< dim3((ny + 1) / BLOCK_SIZE + 1, (nx + 1) / BLOCK_SIZE + 1, 1), dim3(BLOCK_SIZE, BLOCK_SIZE, 1) >> >(ptr_p, ptr_p_ref, nx, ny, dy, wp);
 
-			for (int i = 0; i < nx + 1; i++)
-			{
-				for (int j = 0; j < ny + 1; j++)
-				{
-					if (j == 0)
-					{
-						p[i * wp + j] = p[i * wp + j + 1]; // bottom wall - Final
-					}
-					else if (j == ny)
-					{
-						p[i * wp + j] = p[i * wp + j - 1]; // Upper - no flux
-					}
-					else if (i == 0)
-					{
-						if (j*dy < 2.0)
-						{
-							p[i * wp + j] = p[(i + 1) * wp + j]; // left wall - not the inlet - Final
-						}
-						else
-						{
-							p[i * wp + j] = p[(i + 1) * wp + j];
-						}
-					}
-					else if (i == nx)
-					{
-						if (j*dy < 2.0)
-						{
-							p[i * wp + j] = p[(i - 1) * wp + j]; // right wall - not the outlet - Final
-						}
-						else
-						{
-							p[i * wp + j] = -p[(i - 1) * wp + j]; // pressure outlet - static pressure is zero - Final
-						}
-					}
-				} // end for j
-			} // end for i
-			  //................................................................................................
+			cudaDeviceSynchronize();
 
 			error = pow(error, 0.5);
 			iter = iter + 1;
-			if (iter > maxiter)
-			{
-				break;
-			}
 
 		} // end while eps
+
+		p = p_d;
 
 		int step2_end = clock();
 		stepTimingAccumulator["Step 2 - Solve for pressure until tolerance or max iterations"] += step2_end - step2_start;
@@ -463,15 +489,27 @@ void DNSCPU::Step()
 		// Step 4 - It can be parallelized
 		// Solving for temperature
 		int step4_start = clock();
-		Told = T;
-		for (int i = 1; i < nx; i++)
-		{
-			for (int j = 1; j < ny; j++)
-			{
 
-				T[i * wT + j] = Told[i * wT + j] + dt*(-0.5*(u[i * wu + j] + u[(i - 1) * wu + j])*(1.0 / (2.0*dx)*(Told[(i + 1) * wT + j] - Told[(i - 1) * wT + j])) - 0.5*(v[i * wv + j] + v[i * wv + j - 1])*(1.0 / (2.0*dy)*(Told[i * wT + j + 1] - Told[i * wT + j - 1])) + 1 / (Re*Pr)*(1 / pow(dx, 2.0)*(Told[(i + 1) * wT + j] - 2.0*Told[i * wT + j] + Told[(i - 1) * wT + j]) + 1 / pow(dy, 2.0)*(Told[i * wT + j + 1] - 2 * Told[i * wT + j] + Told[i * wT + j - 1])));
-			} // end for j
-		} // end for i
+		thrust::device_vector<float> d_T = T;
+		thrust::device_vector<float> d_Told = Told;
+		thrust::device_vector<float> d_u = u;
+		thrust::device_vector<float> d_v = v;
+
+		int gridsize_x = nx / BLOCK_SIZE + 1;
+		int gridsize_y = ny / BLOCK_SIZE + 1;
+
+		dim3 dimgrid(gridsize_x, gridsize_y, 1); // The grid has #gridsize blocks in x and 1 block in y and 1 block in z direction
+		dim3 dimblock(BLOCK_SIZE, BLOCK_SIZE, 1);
+
+		float *ptr_u = thrust::raw_pointer_cast(&d_u[0]);
+		float *ptr_v = thrust::raw_pointer_cast(&d_v[0]);
+		float *ptr_T = thrust::raw_pointer_cast(&d_T[0]);
+		float *ptr_Told = thrust::raw_pointer_cast(&d_Told[0]);
+
+		Temperature_solver << <dimgrid, dimblock >> >(nx, ny, wu, wv, wT, dx, dy, dt, Re, Pr, ptr_u, ptr_v, ptr_Told, ptr_T);
+
+		thrust::copy(d_Told.begin(), d_Told.end(), Told.begin());
+		thrust::copy(d_T.begin(), d_T.end(), T.begin());
 
 		int step4_end = clock();
 		stepTimingAccumulator["Step 4 - Solving for temperature"] += step4_end - step4_start;
@@ -563,7 +601,7 @@ void DNSCPU::Step()
 	}
 }
 
-void DNSCPU::Finish()
+void DNSGPU::Finish()
 {
 	// Step 6
 	// Co-locate the staggered grid points 
@@ -607,11 +645,53 @@ void DNSCPU::Finish()
 
 	s_nextState = END;
 }
-DNSCPU::DNSCPU()
+DNSGPU::DNSGPU()
 {
 }
 
 
-DNSCPU::~DNSCPU()
+DNSGPU::~DNSGPU()
 {
+}
+
+
+std::vector<float>& DNSGPU::getPressure()
+{
+	vizOutput.resize(p.size());
+	for (int i = 0; i != p.size(); ++i)
+		vizOutput[i] = p[i];
+
+	return vizOutput;
+}
+float DNSGPU::getPressureWidth()
+{
+	return wp;
+}
+
+std::vector<float>& DNSGPU::getTemperature()
+{
+	vizOutput.resize(T.size());
+
+	for (int i = 0; i != T.size(); ++i)
+		vizOutput[i] = T[i];
+
+	return vizOutput;
+}
+float DNSGPU::getTemperatureWidth()
+{
+	return wT;
+}
+
+std::vector<float>& DNSGPU::getU()
+{
+	vizOutput.resize(u.size());
+
+	for (int i = 0; i != u.size(); ++i)
+		vizOutput[i] = u[i];
+
+	return vizOutput;
+}
+float DNSGPU::getUWidth()
+{
+	return wu;
 }
