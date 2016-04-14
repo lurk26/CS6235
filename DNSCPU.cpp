@@ -41,7 +41,7 @@ namespace
 	float eps = 0.001; // Pressure convergence criteria
 	float tf = 100; // Final time step
 	float Pr = 0.5*(0.709 + 0.711); // Prandtl number
-	float Re = 300.0; float Fr = 0.3; // Non-dimensional numbers for inflow conditions
+	float Re = 200.0; float Fr = 0.3; // Non-dimensional numbers for inflow conditions
 	float dx = Lx / (nx - 1); 
 	float dy = Ly / (ny - 1); // dx and dy
 											//beta = 1; // Successive over relaxation factor (SOR)
@@ -51,7 +51,7 @@ namespace
 	float T_amb = 25.0; // Ambient air temperature (C)
 	float T_0 = 50.0; // Initial air temperature
 	
-	int maxiter = 100; // Maximum iteration at each time step
+	int maxiter = 1000; // Maximum iteration at each time step
 	int counter = 0; // initial row for output monitoring
 	int column = 1; // Column number for output display
 				// Records number of clicks a step takes
@@ -73,7 +73,7 @@ namespace
 	vector<float> pold((nx + 1) * (ny + 1), 0);
 	int wp = ny + 1;
 
-	vector<float> T((nx + 1) * (ny + 1), T_0 / T_amb);     // Initializing the flow variable (Temperature)  
+	vector<float> T;     // Initializing the flow variable (Temperature)  
 														   // Boundary conditions for T (Initialization)
 	int wT = ny + 1;
 
@@ -146,6 +146,7 @@ void DNSCPU::Init()
 
 	T_L = T_L + 273.15; T_0 = T_0 + 273.15; T_amb = T_amb + 273.15; T_R = T_R + 273.15;// Unit conversion to (K)
 
+	T.resize((nx + 1) * (ny + 1), T_0 / T_amb);
 	Told.resize((nx + 1) * (ny + 1), 0);
 	om.resize(nx * ny, 0);
 	vc.resize(nx * ny, 0);
