@@ -25,28 +25,28 @@ int main()
     cout << setprecision(5);
 
     // Input parameters 
-    float Re, Pr, Fr, T_L, T_0, T_amb, ni, nj, dx, dy, t, ny, nx, eps, /*beta,*/ iter, maxiter, tf, st, counter, column, u_wind, T_R, Lx, Ly;
-    Lx = 4.0; Ly = 5.0; // Domain dimensions
-    ni = 10.0; // Number of nodes per unit length in x direction
-    nj = 10.0; // Number of nodes per unit length in y direction
-    nx = Lx * ni; ny = Ly * nj; // Number of Nodes in each direction
-    u_wind = 1; // Reference velocity
-    st = 0.00005 * 2; // Total variance criteria
-    eps = 0.001; // Pressure convergence criteria
-    tf = 100; // Final time step
-    Pr = 0.5*(0.709 + 0.711); // Prandtl number
-    Re = 250.0; Fr = 0.3; // Non-dimensional numbers for inflow conditions
-    dx = Lx / (nx - 1); dy = Ly / (ny - 1); // dx and dy
-    //beta = 1; // Successive over relaxation factor (SOR)
-    t = 0; // Initial time step
-    T_L = 100.0; // Left wall temperature (C)
-    T_R = 50.0; // Right wall temperature (C)
-    T_amb = 25.0; // Ambient air temperature (C)
-    T_0 = 50.0; // Initial air temperature
-    T_L = T_L + 273.15; T_0 = T_0 + 273.15; T_amb = T_amb + 273.15; T_R = T_R + 273.15;// Unit conversion to (K)
-    maxiter = 500; // Maximum iteration at each time step
-    counter = 0; // initial row for output monitoring
-    column = 1; // Column number for output display
+	float Re, Pr, Fr, T_L, T_0, T_amb, dx, dy, t, eps, /* beta, */ iter, maxiter, tf, st, counter, column, u_wind, T_R, Lx, Ly;
+	Lx = 4.0; Ly = 5.0; // Domain dimensions
+	int ni = 10.0; // Number of nodes per unit length in x direction
+	int nj = 10.0; // Number of nodes per unit length in y direction
+	int nx = Lx * ni; int ny = Ly * nj; // Number of Nodes in each direction
+	u_wind = 1; // Reference velocity
+	st = 0.00005 * 2; // Total variance criteria
+	eps = 0.001; // Pressure convergence criteria
+	tf = 100; // Final time step
+	Pr = 0.5*(0.709 + 0.711); // Prandtl number
+	Re = 250.0; Fr = 0.3; // Non-dimensional numbers for inflow conditions
+	dx = Lx / (nx - 1); dy = Ly / (ny - 1); // dx and dy
+	//beta = 1; // Successive over relaxation factor (SOR)
+	t = 0; // Initial time step
+	T_L = 100.0; // Left wall temperature (C)
+	T_R = 50.0; // Right wall temperature (C)
+	T_amb = 25.0; // Ambient air temperature (C)
+	T_0 = 50.0; // Initial air temperature
+	T_L = T_L + 273.15; T_0 = T_0 + 273.15; T_amb = T_amb + 273.15; T_R = T_R + 273.15;// Unit conversion to (K)
+	maxiter = 500; // Maximum iteration at each time step
+	counter = 0; // initial row for output monitoring
+	column = 1; // Column number for output display
 
     // Records number of clicks a step takes
     std::map<string, uint32_t> stepTimingAccumulator;
