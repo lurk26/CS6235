@@ -18,8 +18,7 @@
 #include "freeglut/include/GL/glut.h"
 
 #include "HSV_RGB.h"
-#include "DNSCPU.h"
-#include "DNSGPU.cuh"
+#include "ThrustCachedAllocator.h"
 
 using namespace std;
 
@@ -49,9 +48,11 @@ struct RenderData2D
     }
 };
 
+
 RenderData2D s_drawData;
 
-
+thrust::host_vector<float> u_global, v_global;
+float wu_global, wv_global;
 
 void idleCPU()
 {
@@ -85,7 +86,6 @@ void idleGPU()
 	//glutPostRedisplay();
 }
 
-void RenderPrimitive();
 void display();
 
 // The original SOR solver lives in DoStuff();
@@ -110,7 +110,7 @@ int main(int argc, char**argv)
     // The idle func (defined in thsi while) will run the simulation (currently its jacobi)
     //glutIdleFunc(idleGPU);
 	
-    glutMainLoop();
+    //glutMainLoop();
     return 0;
 } // end main
 
@@ -211,11 +211,11 @@ try
 		// Input parameters 
 		float Re, Pr, Fr, T_L, T_0, T_amb, dx, dy, t, eps2,  beta,  iter, maxiter, tf, st, counter, column, u_wind, T_R, Lx, Ly;
 		Lx = 4.0; Ly = 5.0; // Domain dimensions
-		int ni = 10.0; // Number of nodes per unit length in x direction
-		int nj = 10.0; // Number of nodes per unit length in y direction
+		int ni = 18.0; // Number of nodes per unit length in x direction
+		int nj = 18.0; // Number of nodes per unit length in y direction
 		int nx = Lx * ni; int ny = Ly * nj; // Number of Nodes in each direction
 		u_wind = 1; // Reference velocity
-		st = 0.00005 * 2; // Total variance criteria
+		st = 0.00005 ; // Total variance criteria
 		eps2 = 0.001*0.001; // Pressure convergence criteria (epsilon squared)
 		tf = 100.01; // Final time step
 		Pr = 0.5*(0.709 + 0.711); // Prandtl number
@@ -272,6 +272,8 @@ try
 		thrust::device_vector<float> p_old((nx + 1) * (ny + 1));
 		thrust::device_vector<float> p_ref((nx + 1) * (ny + 1));
 		thrust::device_vector<float> abs_d((nx + 1) * (ny + 1));
+
+		cached_allocator alloc;
 
 		// Time step size stability criterion
 
@@ -502,15 +504,13 @@ try
 			cout << "Time:" <<t;
 			// Begin Jacobi loop
 			while (error > eps2){
-				p_old = p_d;
-
 				// SOR pressure solver
-				PressureSolve<<< dim3( (ny+1)/BLOCK_SIZE + 1, (nx+1)/BLOCK_SIZE + 1, 1) , dim3(BLOCK_SIZE,BLOCK_SIZE,1)>>>(ptr_p, ptr_p_old, ptr_abs, ptr_us, ptr_vs, p_xlength, p_ylength, wp, wu, wv, dx, dy, dx*dx, dy*dy, dt, beta);
+				PressureBC << < dim3((ny + 1) / BLOCK_SIZE + 1, (nx + 1) / BLOCK_SIZE + 1, 1), dim3(BLOCK_SIZE, BLOCK_SIZE, 1) >> >(ptr_p, ptr_p, nx, ny, dy, wp);
 				cudaDeviceSynchronize();
-				
-				PressureBC<<< dim3( (ny+1)/BLOCK_SIZE + 1, (nx+1)/BLOCK_SIZE + 1, 1) , dim3(BLOCK_SIZE,BLOCK_SIZE,1)>>>(ptr_p, ptr_p, nx, ny, dy, wp);
-
-				error = thrust::reduce(abs_d.begin(), abs_d.end());
+				PressureSolve<<< dim3( (ny+1)/BLOCK_SIZE + 1, (nx+1)/BLOCK_SIZE + 1, 1) , dim3(BLOCK_SIZE,BLOCK_SIZE,1)>>>(ptr_p, ptr_p_old, ptr_abs, ptr_us, ptr_vs, p_xlength, p_ylength, wp, wu, wv, dx, dy, dx*dx, dy*dy, dt, beta);
+				PressureSolve << < dim3((ny + 1) / BLOCK_SIZE + 1, (nx + 1) / BLOCK_SIZE + 1, 1), dim3(BLOCK_SIZE, BLOCK_SIZE, 1) >> >(ptr_p, ptr_p_old, ptr_abs, ptr_us, ptr_vs, p_xlength, p_ylength, wp, wu, wv, dx, dy, dx*dx, dy*dy, dt, beta);
+				cudaDeviceSynchronize();
+				error = thrust::reduce(thrust::cuda::par(alloc), abs_d.begin(), abs_d.end());
 
 				iter = iter + 1;
 				if (iter == maxiter){
@@ -518,10 +518,12 @@ try
 				}
 
 			} // end while eps
-			std::cout << "\t Iters:" << iter << "\t Err:" << error << endl;
+			PressureBC << < dim3((ny + 1) / BLOCK_SIZE + 1, (nx + 1) / BLOCK_SIZE + 1, 1), dim3(BLOCK_SIZE, BLOCK_SIZE, 1) >> >(ptr_p, ptr_p, nx, ny, dy, wp);
 			p = p_d;
-
 			int step2_end = clock();
+
+			std::cout << "\t Iters:" << iter << "\t Err:" << error << "\tPressure loop time:" << step2_end - step1_end;
+
 			stepTimingAccumulator["Step 2 - Solve for pressure until tolerance or max iterations"] += step2_end - step2_start;
 
 
@@ -665,13 +667,22 @@ try
 			g << column << setw(30) << t << setw(30) << iter << setw(30) << error << setw(30) << TV << endl;
 			t = t + dt;
 			column = column + 1;
+			int renderStartTime = clock();
 
 			std::vector<float> toDraw(u.size());
 			std::copy(u.data(), u.data() + u.size(), toDraw.begin());
 			s_drawData.Init(toDraw, wu, *(std::max_element(toDraw.begin(), toDraw.end())), *(std::min_element(toDraw.begin(), toDraw.end())));
+			u_global = u; wu_global = wu;
+			v_global = v; wv_global = wv;
 			display();
-		} // end while time
 
+			int renderEndTime = clock();
+			stepTimingAccumulator["Render time"] += renderEndTime - renderStartTime;
+			cout << "\tRenderTime: " << (renderEndTime - renderStartTime );
+
+
+			cout << endl;
+		} // end while time
 		cudaProfilerStop();
 		//........................................................................................................
 
@@ -737,8 +748,8 @@ void DoStuff()
 
     // Input parameters 
 	float Lx = 4.0, Ly = 5.0; // Domain dimensions
-	int ni = 10; // Number of nodes per unit length in x direction
-	int nj = 10; // Number of nodes per unit length in y direction
+	int ni = 20; // Number of nodes per unit length in x direction
+	int nj = 20; // Number of nodes per unit length in y direction
 	int nx = Lx * ni;
 	int ny = Ly * nj; // Number of Nodes in each direction
 	float u_wind = 1; // Reference velocity
@@ -757,7 +768,7 @@ void DoStuff()
 	float T_amb = 25.0; // Ambient air temperature (C)
 	float T_0 = 50.0; // Initial air temperature
 	T_L = T_L + 273.15; T_0 = T_0 + 273.15; T_amb = T_amb + 273.15; T_R = T_R + 273.15;// Unit conversion to (K)
-	int maxiter = 1000; // Maximum iteration at each time step
+	int maxiter = 300; // Maximum iteration at each time step
 	int counter = 0; // initial row for output monitoring
 	int column = 1; // Column number for output display
 					// Records number of clicks a step takes
@@ -1062,8 +1073,9 @@ void DoStuff()
             }
 
         } // end while eps
-		std::cout << "\t Iters:" << iter << "\t Err:" << error << endl;
+		
         int step2_end = clock();
+		std::cout << "\t Iters:" << iter << "\t Err:" << error << "\tPressure loop time:" << step2_end - step1_end << endl;
         stepTimingAccumulator["Step 2 - Solve for pressure until tolerance or max iterations"] += step2_end - step2_start;
         //...............................................................................................
 
@@ -1247,10 +1259,28 @@ void DoStuff()
 
 }
 
+void drawOrientedTriangle2D(float u, float v, float x, float y)
+{
+	float angle = atan2f(v , u) * 180 / 3.1415926f;
+	
+	glColor3f(1, 1, 1);
+	glPushMatrix();
+	glTranslatef(x, y, 0);
+	glRotatef(angle, 0, 0, 1);
+	glScalef(0.03, 0.03, 1);
+	glEnable(GL_POLYGON_SMOOTH);
+	glBegin(GL_TRIANGLES);
+		glVertex2d(-0.8, 0.3);
+		glVertex2d(-0.8, -0.3);
+		glVertex2d(0.8, 0);
+	glEnd();
+	glPopMatrix();
+	glDisable(GL_POLYGON_SMOOTH);
+}
+
 void renderPrimitive()
 {
-    //     glColor3f(1, 0.4, 0.2);
-    //glPointSize(WINDOW_WIDTH/s_drawData.m_width);
+    
     int windowWidth = glutGet(GLUT_WINDOW_WIDTH);
     int windowHeight = glutGet(GLUT_WINDOW_HEIGHT);
     if (s_drawData.m_data.size() > 0)
@@ -1265,13 +1295,33 @@ void renderPrimitive()
             rgb color = s_drawData.m_data[i];
             glColor3f(color.r, color.g, color.b);
 
-            x = (2 * x / s_drawData.m_width) - 1;
-            y = (2 * y / height) - 1;
+			x = (2 * x / height) - 1;
+			y = (2 * y / s_drawData.m_width) - 1;
             glVertex2d(x, y);
         }
         glEnd();
     }
 
+}
+
+void drawOrientedTriangles(thrust::host_vector<float>& u, int wu, thrust::host_vector<float>&  v, int wv, float occurence_rate /* 0 to 1 */)
+{
+	assert(u.size() == v.size());
+	
+	for (int i = 0; i < u.size(); ++i)
+	{
+	
+			float x = i / wu;
+			float y = i - x*wu;
+			int height = u.size() / wu;
+			if (((int)x % 6) == 0 && ((int)y % 6) == 0)
+			{
+				x = (2 * x / height) - 1;
+				y = (2 * y / wu) - 1;
+				drawOrientedTriangle2D(u[i], v[i], x, y);
+			}
+
+	}
 }
 
 void display()
@@ -1286,6 +1336,7 @@ void display()
     glPushMatrix();
     glTranslatef(0.0f, 0.0f, -0.5f);
     renderPrimitive();
+	drawOrientedTriangles(u_global, wu_global, v_global, wv_global, 0.17);
     glPopMatrix();
 
     glutSwapBuffers();
