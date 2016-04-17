@@ -13,6 +13,8 @@
 #include <thrust/device_vector.h>
 #include <thrust/reduce.h>
 
+#include <cuda_profiler_api.h>
+
 #include "freeglut/include/GL/glut.h"
 
 #include "HSV_RGB.h"
@@ -130,7 +132,7 @@ __global__ void Temperature_solver(int nx, int ny, int wu, int wv, int wT, float
 
 
 
-__global__ void PressureSolve(float * p_d, const float * p_old, float * abs_d, const float * us_d, const float * vs_d, int p_xlength, int p_ylength, int wp, int wu, int wv, float dx, float dy, float dt)
+__global__ void PressureSolve(float * p_d, const float * p_old, float * abs_d, const float * us_d, const float * vs_d, int p_xlength, int p_ylength, int wp, int wu, int wv, float dx, float dy, float dx2, float dy2, float dt, float beta)
 {
 
 	int i = threadIdx.x + blockDim.x*blockIdx.x;
@@ -139,17 +141,12 @@ __global__ void PressureSolve(float * p_d, const float * p_old, float * abs_d, c
 
 	if (i > 0 && i < p_xlength && j > 0 && j < p_ylength)
 	{
-		//        __syncthreads();
-
-		p_d[i * wp + j] = pow(dx, 2.0f)*pow(dy, 2.0f) / (-2.0*(pow(dx, 2.0f) + pow(dy, 2.0f)))*(-1.0 / pow(dx, 2.0f)*(p_old[(i + 1) * wp + j] + p_old[(i - 1) * wp + j] + p_old[i * wp + j + 1] + p_old[i * wp + j - 1]) + 1.0 / dt*(1.0 / dx*(us_d[i * wu + j] - us_d[(i - 1) * wu + j]) + 1.0 / dy*(vs_d[i * wv + j] - vs_d[i * wv + j - 1])));
-		__syncthreads();
-
-		abs_d[i * wp + j] = p_d[i * wp + j] - p_old[i * wp + j];
-
-		__syncthreads();
-
-		abs_d[i * wp + j] = abs_d[i * wp + j] * abs_d[i * wp + j];
-		//__syncthreads();
+		float p_0 = p_d[i * wp + j];
+		p_d[i * wp + j] = beta*(dx2*dy2 / (-2.0*(dx2 + dy2))*(-1.0 / dx2*(p_d[(i + 1) * wp + j] + p_d[(i - 1) * wp + j] + p_d[i * wp + j + 1] + p_d[i * wp + j - 1]) + 1.0 / dt*(1.0 / dx*(us_d[i * wu + j] - us_d[(i - 1) * wu + j]) + 1.0 / dy*(vs_d[i * wv + j] - vs_d[i * wv + j - 1])))) + (1.0 - beta)*p_d[i * wp + j];
+		
+		float error = p_d[i * wp + j] - p_0;
+		abs_d[i * wp + j] = error*error;
+		
 	} // end if
 
 
@@ -165,21 +162,21 @@ __global__ void PressureBC(float * p_d, float * p_ref, int nx, int ny, float dy,
 	if (i >= 0 && i < nx + 1 && j == 0){
 		p_d[i * wp + j] = p_ref[i * wp + j + 1]; // bottom wall - Final
 	}
-	__syncthreads();
+
 	if (i >= 0 && i < nx + 1 && j == ny){
 		p_d[i * wp + j] = p_ref[i * wp + j - 1]; // Upper - no flux
 	}
-	__syncthreads();
+
 	if (j >= 0 && j < ny + 1 && i == 0){
 		p_d[i * wp + j] = p_ref[(i + 1) * wp + j]; // left wall - not the inlet - Final
 	}
-	__syncthreads();
+
 	if (j >= 0 && j < ny + 1 && i == nx && j*dy < 2.0){
 		p_d[i * wp + j] = p_ref[(i - 1) * wp + j]; // right wall - not the outlet - Final
 
 		// printf("POSITIVE ");
 	}
-	__syncthreads();
+
 	if (j >= 0 && j < ny + 1 && i == nx && j*dy >= 2.0){
 		p_d[i * wp + j] = -p_ref[(i - 1) * wp + j]; // pressure outlet - static pressure is zero - Final
 		// printf("NEGATIVE ");    
@@ -212,26 +209,26 @@ try
 		//file_p_after << setprecision(3);
 
 		// Input parameters 
-		float Re, Pr, Fr, T_L, T_0, T_amb, dx, dy, t, eps, /* beta, */ iter, maxiter, tf, st, counter, column, u_wind, T_R, Lx, Ly;
+		float Re, Pr, Fr, T_L, T_0, T_amb, dx, dy, t, eps2,  beta,  iter, maxiter, tf, st, counter, column, u_wind, T_R, Lx, Ly;
 		Lx = 4.0; Ly = 5.0; // Domain dimensions
 		int ni = 10.0; // Number of nodes per unit length in x direction
 		int nj = 10.0; // Number of nodes per unit length in y direction
 		int nx = Lx * ni; int ny = Ly * nj; // Number of Nodes in each direction
 		u_wind = 1; // Reference velocity
 		st = 0.00005 * 2; // Total variance criteria
-		eps = 0.001; // Pressure convergence criteria
-		tf = 100; // Final time step
+		eps2 = 0.001*0.001; // Pressure convergence criteria (epsilon squared)
+		tf = 100.01; // Final time step
 		Pr = 0.5*(0.709 + 0.711); // Prandtl number
 		Re = 250.0; Fr = 0.3; // Non-dimensional numbers for inflow conditions
-		dx = Lx / (nx - 1); dy = Ly / (ny - 1); // dx and dy
-		//beta = 1; // Successive over relaxation factor (SOR)
+		dx = (float)1/ni; dy = (float)1/nj; // dx and dy
+		beta = 0.8f; // Successive over relaxation factor (SOR)
 		t = 0; // Initial time step
 		T_L = 100.0; // Left wall temperature (C)
 		T_R = 50.0; // Right wall temperature (C)
 		T_amb = 25.0; // Ambient air temperature (C)
 		T_0 = 50.0; // Initial air temperature
 		T_L = T_L + 273.15; T_0 = T_0 + 273.15; T_amb = T_amb + 273.15; T_R = T_R + 273.15;// Unit conversion to (K)
-		maxiter = 500; // Maximum iteration at each time step
+		maxiter = 1000; // Maximum iteration at each time step
 		counter = 0; // initial row for output monitoring
 		column = 1; // Column number for output display
 
@@ -267,6 +264,7 @@ try
 		// thrust::host_vector<float> abs_h((nx+1) * (ny + 1));
 		int wc = ny;
 
+		cudaProfilerStart();
 		cudaFree(0);
 		thrust::device_vector<float> us_d(nx*(ny + 1));
 		thrust::device_vector<float> vs_d((nx + 1) * ny);
@@ -501,78 +499,28 @@ try
 			// float diffp = 0;
 			us_d = us;
 			vs_d = vs;
-			cout << t << endl;
+			cout << "Time:" <<t;
 			// Begin Jacobi loop
-			while (error > eps){
-				//error = 0.0;
-				//  p_d = p;
+			while (error > eps2){
 				p_old = p_d;
 
 				// SOR pressure solver
-				PressureSolve<<< dim3( (ny+1)/BLOCK_SIZE + 1, (nx+1)/BLOCK_SIZE + 1, 1) , dim3(BLOCK_SIZE,BLOCK_SIZE,1)>>>(ptr_p, ptr_p_old, ptr_abs, ptr_us, ptr_vs, p_xlength, p_ylength, wp, wu, wv, dx, dy, dt);
+				PressureSolve<<< dim3( (ny+1)/BLOCK_SIZE + 1, (nx+1)/BLOCK_SIZE + 1, 1) , dim3(BLOCK_SIZE,BLOCK_SIZE,1)>>>(ptr_p, ptr_p_old, ptr_abs, ptr_us, ptr_vs, p_xlength, p_ylength, wp, wu, wv, dx, dy, dx*dx, dy*dy, dt, beta);
 				cudaDeviceSynchronize();
-				//	p = p_d;
-				p_ref = p_d;
+				
+				PressureBC<<< dim3( (ny+1)/BLOCK_SIZE + 1, (nx+1)/BLOCK_SIZE + 1, 1) , dim3(BLOCK_SIZE,BLOCK_SIZE,1)>>>(ptr_p, ptr_p, nx, ny, dy, wp);
 
 				error = thrust::reduce(abs_d.begin(), abs_d.end());
 
-				/*  	    for (int i = 1; i < nx; i++)
-				{
-				for (int j = 1; j < ny; j++)
-				{
-				diffp = pow((p[i * wp + j] - p_old[i * wp + j]), 2.0);
-				error = error + diffp;
-				} // end for j
-				} // end for i
-				*/
-
-				/* for(int i = 0; i < nx + 1; ++i)
-				{
-				for(int j = 0; j < ny + 1; ++j)
-				{
-				file_p_before << p[i * wp + j] << "\t";
-				}
-				file_p_before << endl;
-				}
-				*/
-				// Apply boundary conditions
-
-				PressureBC<<< dim3( (ny+1)/BLOCK_SIZE + 1, (nx+1)/BLOCK_SIZE + 1, 1) , dim3(BLOCK_SIZE,BLOCK_SIZE,1)>>>(ptr_p, ptr_p_ref, nx, ny, dy, wp);
-
-				cudaDeviceSynchronize();
-				// p = p_d;
-				//file_p_after << p.size() << endl;
-
-
-				/* for(int i = 0; i < nx + 1; ++i)
-				{
-				for(int j = 0; j < ny + 1; ++j)
-				{
-				file_p_after << p[i * wp + j] << "\t";
-				}
-				file_p_after << endl;
-				} */
-
-				error = pow(error, 0.5);
 				iter = iter + 1;
-				if (iter > maxiter){
+				if (iter == maxiter){
 					break;
 				}
 
 			} // end while eps
-
+			std::cout << "\t Iters:" << iter << "\t Err:" << error << endl;
 			p = p_d;
-			/*          
-			break;
-			error = pow(error, 0.5);
-			iter = iter + 1;            
-			if (iter == maxiter){
-			break;
-			}
 
-
-			} // end while eps
-			*/
 			int step2_end = clock();
 			stepTimingAccumulator["Step 2 - Solve for pressure until tolerance or max iterations"] += step2_end - step2_start;
 
@@ -608,6 +556,7 @@ try
 			stepTimingAccumulator["Step 3 - Velocity Update"] += step3_end - step3_start;
 			//...............................................................................................
 
+			// TODO: Is this CUDA implementation even faster than CPU? (CHECK)
 			//...............................................................................................
 			// Step 4 - It can be parallelized
 			// Solving for temperature
@@ -696,7 +645,7 @@ try
 
 			TV = TV / ((nx - 1)*(ny - 2));
 
-			if (TV < st && error < eps)
+			if (TV < st && error < eps2)
 			{
 				cout << "Steady state time = " << t << " (s) " << endl;
 				break;
@@ -717,8 +666,13 @@ try
 			t = t + dt;
 			column = column + 1;
 
+			std::vector<float> toDraw(u.size());
+			std::copy(u.data(), u.data() + u.size(), toDraw.begin());
+			s_drawData.Init(toDraw, wu, *(std::max_element(toDraw.begin(), toDraw.end())), *(std::min_element(toDraw.begin(), toDraw.end())));
+			display();
 		} // end while time
 
+		cudaProfilerStop();
 		//........................................................................................................
 
 		// Step 6
@@ -795,7 +749,8 @@ void DoStuff()
 	float Re = 300.0; float Fr = 0.3; // Non-dimensional numbers for inflow conditions
 	float dx = Lx / (nx - 1);
 	float dy = Ly / (ny - 1); // dx and dy
-	float beta = 1.4; // Successive over relaxation factor (SOR)
+	dx = dy;
+	float beta = 0.8f; // Successive over relaxation factor (SOR)
 	float t = 0; // Initial time step
 	float T_L = 100.0; // Left wall temperature (C)
 	float T_R = 50.0; // Right wall temperature (C)
@@ -1041,6 +996,7 @@ void DoStuff()
 
         float error = 1; iter = 0;
         float diffp, pold;
+		cout << "Time:"<<t;
         // Solve for pressure iteratively until it converges - Using Gauss Seidel SOR 
         while (error > eps)
         {
@@ -1106,7 +1062,7 @@ void DoStuff()
             }
 
         } // end while eps
-
+		std::cout << "\t Iters:" << iter << "\t Err:" << error << endl;
         int step2_end = clock();
         stepTimingAccumulator["Step 2 - Solve for pressure until tolerance or max iterations"] += step2_end - step2_start;
         //...............................................................................................
