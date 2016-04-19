@@ -2,7 +2,7 @@
 CC=/usr/local/cuda/bin/nvcc -std=c++11
 INCLUDE=-I/usr/local/cuda/include
 HEADER=-I/usr/local/cuda/samples/common/inc
-FLAGS = -g -Wall
+CFLAGS = -Wall -O2
 SOURCES = dns.cu
 LIBS = -lGL -lGLU -lglut
 EXECUTABLES = dns

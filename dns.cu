@@ -145,7 +145,7 @@ __global__ void PressureSolve(float * p_d, const float * p_old, float * abs_d, c
 		p_d[i * wp + j] = beta*(dx2*dy2 / (-2.0*(dx2 + dy2))*(-1.0 / dx2*(p_d[(i + 1) * wp + j] + p_d[(i - 1) * wp + j] + p_d[i * wp + j + 1] + p_d[i * wp + j - 1]) + 1.0 / dt*(1.0 / dx*(us_d[i * wu + j] - us_d[(i - 1) * wu + j]) + 1.0 / dy*(vs_d[i * wv + j] - vs_d[i * wv + j - 1])))) + (1.0 - beta)*p_d[i * wp + j];
 		
 		float error = p_d[i * wp + j] - p_0;
-		abs_d[i * wp + j] = error*error;
+		abs_d[i * wp + j] = abs_d[i * wp + j]+ error*error;
 		
 	} // end if
 
@@ -190,7 +190,7 @@ void DoStuffGPU()
 try
 	{
 		// output format
-		float start_clock = clock();
+
 		ofstream f("result_gpu.txt"); // Solution Results
 		f.setf(ios::fixed | ios::showpoint);
 		f << setprecision(5);
@@ -209,14 +209,15 @@ try
 		//file_p_after << setprecision(3);
 
 		// Input parameters 
-		float Re, Pr, Fr, T_L, T_0, T_amb, dx, dy, t, eps2,  beta,  iter, maxiter, tf, st, counter, column, u_wind, T_R, Lx, Ly;
+		float Re, Pr, Fr, T_L, T_0, T_amb, dx, dy, t, eps,  beta, tf, st, counter, column, u_wind, T_R, Lx, Ly;
 		Lx = 4.0; Ly = 5.0; // Domain dimensions
 		int ni = 18.0; // Number of nodes per unit length in x direction
 		int nj = 18.0; // Number of nodes per unit length in y direction
 		int nx = Lx * ni; int ny = Ly * nj; // Number of Nodes in each direction
+		int maxiter;
 		u_wind = 1; // Reference velocity
 		st = 0.00005 ; // Total variance criteria
-		eps2 = 0.001*0.001; // Pressure convergence criteria (epsilon squared)
+		eps = 0.001f; // Pressure convergence criteria (epsilon squared)
 		tf = 100.01; // Final time step
 		Pr = 0.5*(0.709 + 0.711); // Prandtl number
 		Re = 250.0; Fr = 0.3; // Non-dimensional numbers for inflow conditions
@@ -294,6 +295,7 @@ try
 			dt = mt2;
 		}
 
+		float start_clock = clock();
 
 		//......................................................................................
 		// Step 0 - It can be parallelized
@@ -317,7 +319,7 @@ try
 		while (t <= tf)
 		{
 
-			iter = 0;
+			int iter = 0;
 
 			int stepi1_start = clock();
 			//........................................................................................
@@ -497,32 +499,37 @@ try
 			float *ptr_abs = thrust::raw_pointer_cast(&abs_d[0]);
 			float *ptr_p_ref = thrust::raw_pointer_cast(&p_ref[0]);
 
-			float error = 1.0; iter = 0;
+			iter = 0;
 			// float diffp = 0;
 			us_d = us;
 			vs_d = vs;
 			cout << "Time:" <<t;
-			// Begin Jacobi loop
-			while (error > eps2){
+	
+			while (iter < maxiter){
 				// SOR pressure solver
 				PressureBC << < dim3((ny + 1) / BLOCK_SIZE + 1, (nx + 1) / BLOCK_SIZE + 1, 1), dim3(BLOCK_SIZE, BLOCK_SIZE, 1) >> >(ptr_p, ptr_p, nx, ny, dy, wp);
-				cudaDeviceSynchronize();
+
 				PressureSolve<<< dim3( (ny+1)/BLOCK_SIZE + 1, (nx+1)/BLOCK_SIZE + 1, 1) , dim3(BLOCK_SIZE,BLOCK_SIZE,1)>>>(ptr_p, ptr_p_old, ptr_abs, ptr_us, ptr_vs, p_xlength, p_ylength, wp, wu, wv, dx, dy, dx*dx, dy*dy, dt, beta);
-				PressureSolve << < dim3((ny + 1) / BLOCK_SIZE + 1, (nx + 1) / BLOCK_SIZE + 1, 1), dim3(BLOCK_SIZE, BLOCK_SIZE, 1) >> >(ptr_p, ptr_p_old, ptr_abs, ptr_us, ptr_vs, p_xlength, p_ylength, wp, wu, wv, dx, dy, dx*dx, dy*dy, dt, beta);
-				cudaDeviceSynchronize();
-				error = thrust::reduce(thrust::cuda::par(alloc), abs_d.begin(), abs_d.end());
-
+				
 				iter = iter + 1;
-				if (iter == maxiter){
-					break;
-				}
-
+	
 			} // end while eps
 			PressureBC << < dim3((ny + 1) / BLOCK_SIZE + 1, (nx + 1) / BLOCK_SIZE + 1, 1), dim3(BLOCK_SIZE, BLOCK_SIZE, 1) >> >(ptr_p, ptr_p, nx, ny, dy, wp);
 			p = p_d;
+
+			// Compute the total error over all iterations
+			float error = sqrt(thrust::reduce(thrust::cuda::par(alloc), abs_d.begin(), abs_d.end()) / maxiter);
+			// Reset the error vector for next time
+			thrust::fill(abs_d.begin(), abs_d.end(), 0.0f);
+
+			// Adjust the maxiter based on the total error last time. 
+			float errorRatio = error/eps;
+			if(errorRatio < 1.0f)
+				maxiter = maxiter * errorRatio;
+			
 			int step2_end = clock();
 
-			std::cout << "\t Iters:" << iter << "\t Err:" << error << "\tPressure loop time:" << step2_end - step1_end;
+			std::cout << "\t Pressure Iters:" << iter << "\t Total Error:" << error << "\tPressure loop time:" << step2_end - step2_start;
 
 			stepTimingAccumulator["Step 2 - Solve for pressure until tolerance or max iterations"] += step2_end - step2_start;
 
@@ -647,7 +654,7 @@ try
 
 			TV = TV / ((nx - 1)*(ny - 2));
 
-			if (TV < st && error < eps2)
+			if (TV < st && error < eps)
 			{
 				cout << "Steady state time = " << t << " (s) " << endl;
 				break;
@@ -735,7 +742,7 @@ try
 void DoStuff()
 {
     // output format
-    float start_clock = clock();
+    
     ofstream f("result_cpu.txt"); // Solution Results
     f.setf(ios::fixed | ios::showpoint);
     f << setprecision(5);
@@ -822,7 +829,7 @@ void DoStuff()
         dt = mt2;
     }
 
-
+	float start_clock = clock();
     //......................................................................................
     // Step 0 - It can be parallelized
 
@@ -1306,7 +1313,7 @@ void renderPrimitive()
 
 void drawOrientedTriangles(thrust::host_vector<float>& u, int wu, thrust::host_vector<float>&  v, int wv, float occurence_rate /* 0 to 1 */)
 {
-	assert(u.size() == v.size());
+	//assert(u.size() == v.size());
 	
 	for (int i = 0; i < u.size(); ++i)
 	{
