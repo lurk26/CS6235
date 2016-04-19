@@ -524,12 +524,22 @@ try
 
 			// Adjust the maxiter based on the total error last time. 
 			float errorRatio = error/eps;
-			if(errorRatio < 1.0f)
-				maxiter = maxiter * errorRatio;
+			if(error < eps)
+			{
+				maxiter = maxiter * 0.95 > maxiter - 1 ? maxiter - 1 : maxiter * 0.95;
+				//std::cout<< "\nDecreasing maxiter to: " << maxiter << endl;
+			}
+			else if(error > eps && maxiter < 1000)
+			{
+				//std::cout<< "\nIncreasing maxiter to: " << maxiter << endl;
+				maxiter = maxiter * 1.05 < maxiter + 1 ? maxiter + 1 : maxiter * 1.05;
+			}
+
+
 			
 			int step2_end = clock();
 
-			std::cout << "\t Pressure Iters:" << iter << "\t Total Error:" << error << "\tPressure loop time:" << step2_end - step2_start;
+			std::cout << "\tIters:" << iter << "\t Error:" << error << "\tPressure loop time:" << step2_end - step2_start;
 
 			stepTimingAccumulator["Step 2 - Solve for pressure until tolerance or max iterations"] += step2_end - step2_start;
 
@@ -755,8 +765,8 @@ void DoStuff()
 
     // Input parameters 
 	float Lx = 4.0, Ly = 5.0; // Domain dimensions
-	int ni = 20; // Number of nodes per unit length in x direction
-	int nj = 20; // Number of nodes per unit length in y direction
+	int ni = 18; // Number of nodes per unit length in x direction
+	int nj = 18; // Number of nodes per unit length in y direction
 	int nx = Lx * ni;
 	int ny = Ly * nj; // Number of Nodes in each direction
 	float u_wind = 1; // Reference velocity
