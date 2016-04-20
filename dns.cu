@@ -46,6 +46,23 @@ struct RenderData2D
             m_data[i] = (hsv2rgb(color));
         }
     }
+	
+	void Init(thrust::host_vector<float>& i_data, uint32_t i_width, float maxvalue, float minValue)
+    {
+        m_width = i_width;
+		//float maxvalue = *std::max_element(i_data.begin(), i_data.end());
+        //float minValue = *std::min_element(i_data.begin(), i_data.end());
+        m_data.resize(i_data.size());
+        for (int i = 0; i < i_data.size(); ++i)
+        {
+            hsv color;
+            color.h = (i_data[i] - minValue) / (maxvalue - minValue) * 360;
+            color.s = 0.7;
+            color.v = 0.7;
+            
+            m_data[i] = (hsv2rgb(color));
+        }
+    }
 };
 
 
@@ -211,8 +228,8 @@ try
 		// Input parameters 
 		float Re, Pr, Fr, T_L, T_0, T_amb, dx, dy, t, eps,  beta, tf, st, counter, column, u_wind, T_R, Lx, Ly;
 		Lx = 4.0; Ly = 5.0; // Domain dimensions
-		int ni = 18.0; // Number of nodes per unit length in x direction
-		int nj = 18.0; // Number of nodes per unit length in y direction
+		int ni = 24.0; // Number of nodes per unit length in x direction
+		int nj = 24.0; // Number of nodes per unit length in y direction
 		int nx = Lx * ni; int ny = Ly * nj; // Number of Nodes in each direction
 		int maxiter;
 		u_wind = 1; // Reference velocity
@@ -686,9 +703,8 @@ try
 			column = column + 1;
 			int renderStartTime = clock();
 
-			std::vector<float> toDraw(u.size());
-			std::copy(u.data(), u.data() + u.size(), toDraw.begin());
-			s_drawData.Init(toDraw, wu, *(std::max_element(toDraw.begin(), toDraw.end())), *(std::min_element(toDraw.begin(), toDraw.end())));
+			s_drawData.Init(v, wv, *(std::max_element(v.begin(), v.end())), *(std::min_element(v.begin(), v.end())));
+
 			u_global = u; wu_global = wu;
 			v_global = v; wv_global = wv;
 			display();
@@ -1284,7 +1300,7 @@ void drawOrientedTriangle2D(float u, float v, float x, float y)
 	glPushMatrix();
 	glTranslatef(x, y, 0);
 	glRotatef(angle, 0, 0, 1);
-	glScalef(0.03, 0.03, 1);
+	glScalef(0.04, 0.04, 1);
 	glEnable(GL_POLYGON_SMOOTH);
 	glBegin(GL_TRIANGLES);
 		glVertex2d(-0.8, 0.3);
