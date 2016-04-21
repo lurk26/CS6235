@@ -227,9 +227,9 @@ try
 
 		// Input parameters 
 		float Re, Pr, Fr, T_L, T_0, T_amb, dx, dy, t, eps,  beta, tf, st, counter, column, u_wind, T_R, Lx, Ly;
-		Lx = 4.0; Ly = 5.0; // Domain dimensions
-		int ni = 10.0; // Number of nodes per unit length in x direction
-		int nj = 10.0; // Number of nodes per unit length in y direction
+		Lx = 6.0; Ly = 7.0; // Domain dimensions
+		int ni = 12.0; // Number of nodes per unit length in x direction
+		int nj = 12.0; // Number of nodes per unit length in y direction
 		int nx = Lx * ni; int ny = Ly * nj; // Number of Nodes in each direction
 		int maxiter;
 		u_wind = 1; // Reference velocity
