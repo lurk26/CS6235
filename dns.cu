@@ -228,8 +228,8 @@ try
 		// Input parameters 
 		float Re, Pr, Fr, T_L, T_0, T_amb, dx, dy, t, eps,  beta, tf, st, counter, column, u_wind, T_R, Lx, Ly;
 		Lx = 4.0; Ly = 5.0; // Domain dimensions
-		int ni = 24.0; // Number of nodes per unit length in x direction
-		int nj = 24.0; // Number of nodes per unit length in y direction
+		int ni = 10.0; // Number of nodes per unit length in x direction
+		int nj = 10.0; // Number of nodes per unit length in y direction
 		int nx = Lx * ni; int ny = Ly * nj; // Number of Nodes in each direction
 		int maxiter;
 		u_wind = 1; // Reference velocity
@@ -239,6 +239,7 @@ try
 		Pr = 0.5*(0.709 + 0.711); // Prandtl number
 		Re = 250.0; Fr = 0.3; // Non-dimensional numbers for inflow conditions
 		dx = (float)1/ni; dy = (float)1/nj; // dx and dy
+		
 		beta = 0.8f; // Successive over relaxation factor (SOR)
 		t = 0; // Initial time step
 		T_L = 100.0; // Left wall temperature (C)
@@ -544,6 +545,8 @@ try
 			if(error < eps)
 			{
 				maxiter = maxiter * 0.95 > maxiter - 1 ? maxiter - 1 : maxiter * 0.95;
+				if (maxiter < 10)
+					maxiter = 10;
 				//std::cout<< "\nDecreasing maxiter to: " << maxiter << endl;
 			}
 			else if(error > eps && maxiter < 1000)
@@ -703,7 +706,7 @@ try
 			column = column + 1;
 			int renderStartTime = clock();
 
-			s_drawData.Init(v, wv, *(std::max_element(v.begin(), v.end())), *(std::min_element(v.begin(), v.end())));
+			s_drawData.Init(u, wu, *(std::max_element(u.begin(), u.end())), *(std::min_element(u.begin(), u.end())));
 
 			u_global = u; wu_global = wu;
 			v_global = v; wv_global = wv;
@@ -1369,7 +1372,7 @@ void display()
     glPushMatrix();
     glTranslatef(0.0f, 0.0f, -0.5f);
     renderPrimitive();
-	drawOrientedTriangles(u_global, wu_global, v_global, wv_global, 0.17);
+	//drawOrientedTriangles(u_global, wu_global, v_global, wv_global, 0.17);
     glPopMatrix();
 
     glutSwapBuffers();
