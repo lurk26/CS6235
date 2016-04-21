@@ -46,6 +46,23 @@ struct RenderData2D
             m_data[i] = (hsv2rgb(color));
         }
     }
+	
+	void Init(thrust::host_vector<float>& i_data, uint32_t i_width, float maxvalue, float minValue)
+    {
+        m_width = i_width;
+		//float maxvalue = *std::max_element(i_data.begin(), i_data.end());
+        //float minValue = *std::min_element(i_data.begin(), i_data.end());
+        m_data.resize(i_data.size());
+        for (int i = 0; i < i_data.size(); ++i)
+        {
+            hsv color;
+            color.h = (i_data[i] - minValue) / (maxvalue - minValue) * 360;
+            color.s = 0.7;
+            color.v = 0.7;
+            
+            m_data[i] = (hsv2rgb(color));
+        }
+    }
 };
 
 
@@ -216,14 +233,13 @@ try
 		int nx = Lx * ni; int ny = Ly * nj; // Number of Nodes in each direction
 		int maxiter;
 		u_wind = 1; // Reference velocity
-		st = 0.00005 * 2 ; // Total variance criteria
+		st = 0.00005 * 2; // Total variance criteria
 		eps = 0.001f; // Pressure convergence criteria (epsilon squared)
 		tf = 100.01; // Final time step
 		Pr = 0.5*(0.709 + 0.711); // Prandtl number
 		Re = 250.0; Fr = 0.3; // Non-dimensional numbers for inflow conditions
-	//	dx = (float)1/ni; dy = (float)1/nj; // dx and dy
-		dx = Lx/(nx-1);
-		dy = Ly/(ny-1);
+		//dx = (float)1/ni; dy = (float)1/nj; // dx and dy
+		dx = Lx / (nx - 1); dy = Ly / (ny - 1);
 		beta = 0.8f; // Successive over relaxation factor (SOR)
 		t = 0; // Initial time step
 		T_L = 100.0; // Left wall temperature (C)
@@ -526,12 +542,24 @@ try
 
 			// Adjust the maxiter based on the total error last time. 
 			float errorRatio = error/eps;
-			if(errorRatio < 1.0f)
-				maxiter = maxiter * errorRatio;
+			if(error < eps)
+			{
+				maxiter = maxiter * 0.95 > maxiter - 1 ? maxiter - 1 : maxiter * 0.95;
+				if (maxiter < 10)
+					maxiter = 10;
+				//std::cout<< "\nDecreasing maxiter to: " << maxiter << endl;
+			}
+			else if(error > eps && maxiter < 1000)
+			{
+				//std::cout<< "\nIncreasing maxiter to: " << maxiter << endl;
+				maxiter = maxiter * 1.05 < maxiter + 1 ? maxiter + 1 : maxiter * 1.05;
+			}
+
+
 			
 			int step2_end = clock();
 
-			std::cout << "\t Pressure Iters:" << iter << "\t Total Error:" << error << "\tPressure loop time:" << step2_end - step2_start;
+			std::cout << "\tIters:" << iter << "\t Error:" << error << "\tPressure loop time:" << step2_end - step2_start;
 
 			stepTimingAccumulator["Step 2 - Solve for pressure until tolerance or max iterations"] += step2_end - step2_start;
 
@@ -678,9 +706,8 @@ try
 			column = column + 1;
 			int renderStartTime = clock();
 
-			std::vector<float> toDraw(u.size());
-			std::copy(u.data(), u.data() + u.size(), toDraw.begin());
-			s_drawData.Init(toDraw, wu, *(std::max_element(toDraw.begin(), toDraw.end())), *(std::min_element(toDraw.begin(), toDraw.end())));
+			s_drawData.Init(T, wT, (50 + 273.15) / (25 + 273.15), (100 + 273.15) / (25 + 273.15));//*(std::max_element(T.begin(), T.end())), *(std::min_element(T.begin(), T.end())));
+
 			u_global = u; wu_global = wu;
 			v_global = v; wv_global = wv;
 			display();
@@ -757,8 +784,8 @@ void DoStuff()
 
     // Input parameters 
 	float Lx = 4.0, Ly = 5.0; // Domain dimensions
-	int ni = 20; // Number of nodes per unit length in x direction
-	int nj = 20; // Number of nodes per unit length in y direction
+	int ni = 18; // Number of nodes per unit length in x direction
+	int nj = 18; // Number of nodes per unit length in y direction
 	int nx = Lx * ni;
 	int ny = Ly * nj; // Number of Nodes in each direction
 	float u_wind = 1; // Reference velocity
@@ -1276,7 +1303,7 @@ void drawOrientedTriangle2D(float u, float v, float x, float y)
 	glPushMatrix();
 	glTranslatef(x, y, 0);
 	glRotatef(angle, 0, 0, 1);
-	glScalef(0.06, 0.06, 1);
+	glScalef(0.04, 0.04, 1);
 	glEnable(GL_POLYGON_SMOOTH);
 	glBegin(GL_TRIANGLES);
 		glVertex2d(-0.8, 0.3);
@@ -1345,7 +1372,7 @@ void display()
     glPushMatrix();
     glTranslatef(0.0f, 0.0f, -0.5f);
     renderPrimitive();
-	drawOrientedTriangles(u_global, wu_global, v_global, wv_global, 0.17);
+	//drawOrientedTriangles(u_global, wu_global, v_global, wv_global, 0.17);
     glPopMatrix();
 
     glutSwapBuffers();
