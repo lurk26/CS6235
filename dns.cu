@@ -56,7 +56,11 @@ struct RenderData2D
         for (int i = 0; i < i_data.size(); ++i)
         {
             hsv color;
-            color.h = (i_data[i] - minValue) / (maxvalue - minValue) * 360;
+			float h = -1*((i_data[i] - minValue) / (maxvalue - minValue)) * 360  + 240;
+			if (h > 360) h -= 360;
+			if (h < 0) h += 360;
+			
+			color.h = h;
             color.s = 0.7;
             color.v = 0.7;
             
@@ -706,7 +710,7 @@ try
 			column = column + 1;
 			int renderStartTime = clock();
 
-			s_drawData.Init(T, wT, (50 + 273.15) / (25 + 273.15), (100 + 273.15) / (25 + 273.15));//*(std::max_element(T.begin(), T.end())), *(std::min_element(T.begin(), T.end())));
+			s_drawData.Init(T, wT, (100 + 273.15) / (25 + 273.15), (50 + 273.15) / (25 + 273.15));//*(std::max_element(T.begin(), T.end())), *(std::min_element(T.begin(), T.end())));
 
 			u_global = u; wu_global = wu;
 			v_global = v; wv_global = wv;
