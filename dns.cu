@@ -216,7 +216,7 @@ try
 		int nx = Lx * ni; int ny = Ly * nj; // Number of Nodes in each direction
 		int maxiter;
 		u_wind = 1; // Reference velocity
-		st = 0.00005 ; // Total variance criteria
+		st = 0.00005 * 2 ; // Total variance criteria
 		eps = 0.001f; // Pressure convergence criteria (epsilon squared)
 		tf = 100.01; // Final time step
 		Pr = 0.5*(0.709 + 0.711); // Prandtl number
